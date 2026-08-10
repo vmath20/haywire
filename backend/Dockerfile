@@ -12,12 +12,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
+COPY .python-version* ./
 
-ENV HAYWIRE_DATA=/data
+ENV HAYWIRE_DATA=/tmp/haywire-data
 ENV PORT=8000
 ENV PYTHONUNBUFFERED=1
+ENV HAYWIRE_CORS_ORIGINS=*
+ENV HAYWIRE_CORS_ORIGIN_REGEX=.*
 
-RUN mkdir -p /data
+RUN mkdir -p /tmp/haywire-data
 
 EXPOSE 8000
 
