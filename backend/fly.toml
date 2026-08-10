@@ -1,0 +1,27 @@
+# fly.toml app configuration file generated for Haywire API
+app = "haywire-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HAYWIRE_CORS_ORIGIN_REGEX = "https://.*\\.vercel\\.app"
+  HAYWIRE_CORS_ORIGINS = "http://localhost:3000"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "haywire_data"
+  destination = "/data"

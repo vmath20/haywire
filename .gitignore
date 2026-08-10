@@ -42,3 +42,4 @@ backend/__pycache__/
 **/graphify-out/
 **/haywire-out/
 *.tsbuildinfo
+.vercel

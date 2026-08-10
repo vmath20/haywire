@@ -1,0 +1,10 @@
+# Ignore local caches / bulky paths for Vercel uploads
+backend/.data
+backend/.vercel
+**/.venv
+**/__pycache__
+*.pyc
+.next
+node_modules
+.tsbuildinfo
+*.tsbuildinfo
