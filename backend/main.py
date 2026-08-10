@@ -36,6 +36,18 @@ EXTRACT_TIMEOUT = int(os.environ.get("HAYWIRE_EXTRACT_TIMEOUT", "300"))
 
 app = FastAPI(title="Haywire", version="1.0.0")
 
+
+@app.middleware("http")
+async def strip_api_backend_prefix(request, call_next):
+    """Vercel services keep the public path (/api/backend/...); local rewrites strip it."""
+    path = request.scope.get("path", "")
+    prefix = "/api/backend"
+    if path == prefix or path.startswith(prefix + "/"):
+        new_path = path[len(prefix) :] or "/"
+        request.scope["path"] = new_path
+    return await call_next(request)
+
+
 # Allow browser calls from the Vercel frontend (and local dev).
 _cors_origins = [
     o.strip()
