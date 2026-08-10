@@ -269,37 +269,37 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
-      <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-none bg-[#f4f1ea] lg:rounded-l-2xl">
+      <div className="relative min-h-[420px] flex-1 overflow-hidden bg-wire-paper">
         <div
-          className="absolute inset-0 opacity-40"
+          className="absolute inset-0 opacity-50"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 1px 1px, rgba(28,25,23,0.08) 1px, transparent 0)",
-            backgroundSize: "22px 22px",
+              "radial-gradient(circle at 1px 1px, rgba(11,13,16,0.08) 1px, transparent 0)",
+            backgroundSize: "24px 24px",
           }}
         />
         <div ref={containerRef} className="absolute inset-0" />
         {!zoomEnabled && (
-          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-white/80 px-2 py-1 text-[11px] text-stone-500 shadow-sm backdrop-blur">
-            Zoom disabled — enable in the toolbar
+          <div className="pointer-events-none absolute bottom-3 left-3 border border-wire-ink/10 bg-wire-paper/90 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-wire-mute backdrop-blur">
+            Zoom disabled
           </div>
         )}
       </div>
 
-      <aside className="flex w-full shrink-0 flex-col border-t border-stone-200 bg-white lg:w-[320px] lg:border-l lg:border-t-0 lg:rounded-r-2xl">
-        <div className="border-b border-stone-200 p-3">
+      <aside className="flex w-full shrink-0 flex-col border-t border-wire-ink/10 bg-wire-paper lg:w-[320px] lg:border-l lg:border-t-0">
+        <div className="border-b border-wire-ink/10 p-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-wire-mute" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search nodes…"
-              className="w-full rounded-lg border border-stone-200 bg-stone-50 py-2 pl-9 pr-8 text-sm outline-none focus:border-teal-700/40 focus:bg-white"
+              className="w-full border border-wire-ink/15 bg-white py-2 pl-9 pr-8 text-sm outline-none focus:border-wire-ink"
             />
             {query && (
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-wire-mute hover:text-wire-ink"
                 onClick={() => setQuery("")}
               >
                 <X className="h-4 w-4" />
@@ -307,19 +307,19 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
             )}
           </div>
           {searchHits.length > 0 && (
-            <ul className="mt-2 max-h-36 overflow-auto rounded-lg border border-stone-100">
+            <ul className="mt-2 max-h-36 overflow-auto border border-wire-ink/10">
               {searchHits.map((h) => (
                 <li key={h.id}>
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-stone-50"
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-wire-signal/30"
                     onClick={() => {
                       setQuery("");
                       focusNode(h.id);
                     }}
                   >
                     <span
-                      className="h-2.5 w-2.5 rounded-full"
+                      className="h-2.5 w-2.5"
                       style={{ background: h.color.background }}
                     />
                     <span className="truncate">{h.label}</span>
@@ -330,13 +330,13 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
           )}
         </div>
 
-        <div className="border-b border-stone-200 p-4">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
+        <div className="border-b border-wire-ink/10 p-4">
+          <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-wire-mute">
             Selected
           </h3>
           {selected ? (
-            <div className="mt-2 space-y-1.5 text-sm text-stone-700">
-              <div className="font-semibold text-stone-900">{selected.label}</div>
+            <div className="mt-2 space-y-1.5 text-sm text-wire-ink/80">
+              <div className="font-display text-base font-bold text-wire-ink">{selected.label}</div>
               <div>Type: {selected._file_type || "unknown"}</div>
               <div>Community: {selected._community_name}</div>
               <div>Degree: {selected._degree}</div>
@@ -345,14 +345,14 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
                   href={`${githubBase}/blob/HEAD/${selected._source_file}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-block text-teal-800 underline-offset-2 hover:underline"
+                  className="inline-block underline decoration-wire-signal decoration-2 underline-offset-2"
                 >
                   {selected._source_file}
                 </a>
               )}
               {neighbors.length > 0 && (
                 <div className="pt-2">
-                  <div className="text-[11px] uppercase tracking-wide text-stone-400">
+                  <div className="font-mono text-[10px] uppercase tracking-wide text-wire-mute">
                     Neighbors ({neighbors.length})
                   </div>
                   <div className="mt-1 max-h-28 overflow-auto">
@@ -361,7 +361,7 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
                         key={nb.id}
                         type="button"
                         onClick={() => focusNode(nb.id)}
-                        className="my-0.5 flex w-full items-center gap-2 rounded border-l-[3px] px-2 py-1 text-left text-xs hover:bg-stone-50"
+                        className="my-0.5 flex w-full items-center gap-2 border-l-[3px] px-2 py-1 text-left text-xs hover:bg-wire-signal/25"
                         style={{ borderLeftColor: nb.color }}
                       >
                         {nb.label}
@@ -372,12 +372,12 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
               )}
             </div>
           ) : (
-            <p className="mt-2 text-sm italic text-stone-400">Click a node to inspect it</p>
+            <p className="mt-2 text-sm italic text-wire-mute">Click a node to inspect it</p>
           )}
         </div>
 
-        <div className="border-b border-stone-200 p-4">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
+        <div className="border-b border-wire-ink/10 p-4">
+          <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-wire-mute">
             Edge confidence
           </h3>
           <div className="mt-2 flex gap-1">
@@ -387,29 +387,29 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
                 type="button"
                 onClick={() => setConfidenceFilter(c)}
                 className={clsx(
-                  "rounded-full px-2.5 py-1 text-[11px] font-medium",
+                  "px-2.5 py-1 text-[11px] font-semibold",
                   confidenceFilter === c
-                    ? "bg-stone-900 text-white"
-                    : "bg-stone-100 text-stone-600 hover:bg-stone-200",
+                    ? "bg-wire-ink text-wire-paper"
+                    : "bg-wire-mist/50 text-wire-mute hover:bg-wire-mist",
                 )}
               >
                 {c}
               </button>
             ))}
           </div>
-          <div className="mt-3 space-y-1 text-[11px] text-stone-500">
+          <div className="mt-3 space-y-1 text-[11px] text-wire-mute">
             <div className="flex items-center gap-2">
-              <span className="h-px w-5 bg-stone-500" /> EXTRACTED (solid)
+              <span className="h-px w-5 bg-wire-mute" /> EXTRACTED (solid)
             </div>
             <div className="flex items-center gap-2">
-              <span className="h-px w-5 border-t border-dashed border-teal-600" /> INFERRED
+              <span className="h-px w-5 border-t border-dashed border-wire-signalDeep" /> INFERRED
               (dashed)
             </div>
           </div>
         </div>
 
         <div className="flex-1 overflow-auto p-4">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">
+          <h3 className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-wire-mute">
             Communities
           </h3>
           <ul className="mt-2 space-y-1">
@@ -419,25 +419,25 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
                   type="button"
                   onClick={() => toggleCommunity(item.id)}
                   className={clsx(
-                    "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs transition",
+                    "flex w-full items-center gap-2 px-1.5 py-1.5 text-left text-xs transition",
                     activeCommunities.has(item.id)
-                      ? "text-stone-800 hover:bg-stone-50"
+                      ? "text-wire-ink hover:bg-wire-signal/25"
                       : "opacity-35 hover:opacity-60",
                   )}
                 >
                   <span
-                    className="h-3 w-3 rounded-full"
+                    className="h-3 w-3"
                     style={{ background: item.color }}
                   />
                   <span className="flex-1 truncate">{item.name}</span>
-                  <span className="text-stone-400">{item.count}</span>
+                  <span className="text-wire-mute">{item.count}</span>
                 </button>
               </li>
             ))}
           </ul>
         </div>
 
-        <div className="border-t border-stone-200 px-4 py-3 font-mono text-[11px] text-stone-400">
+        <div className="border-t border-wire-ink/10 px-4 py-3 font-mono text-[11px] text-wire-mute">
           {result.summary.node_count} nodes · {result.summary.edge_count} edges ·{" "}
           {result.summary.community_count} communities
         </div>

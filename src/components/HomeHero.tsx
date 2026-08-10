@@ -2,13 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { ArrowRight, GitBranch } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { EXAMPLES, parseGithubInput } from "@/lib/types";
+import { WireCanvas } from "@/components/WireCanvas";
 
 export function HomeHero() {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
 
   function submit(raw: string) {
     const parsed = parseGithubInput(raw);
@@ -26,70 +28,91 @@ export function HomeHero() {
   }
 
   return (
-    <section className="relative mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-5xl flex-col items-center justify-center px-4 pb-16 pt-8 sm:px-6">
-      <div className="absolute inset-x-0 top-16 mx-auto h-64 max-w-3xl rounded-full bg-teal-500/10 blur-3xl" />
+    <section className="relative isolate min-h-[calc(100vh-4rem)] overflow-hidden">
+      <div className="wire-grid absolute inset-0 opacity-70" aria-hidden />
+      <WireCanvas />
 
-      <p className="animate-fade-up relative mb-4 inline-flex items-center gap-2 rounded-full border border-teal-800/15 bg-white/70 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-teal-900/80 shadow-sm backdrop-blur">
-        <GitBranch className="h-3.5 w-3.5" />
-        Knowledge graph for any repo
-      </p>
+      {/* Soft vignette so type stays readable over the graph */}
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(238,241,244,0.55)_0%,rgba(238,241,244,0.2)_45%,transparent_70%)]"
+        aria-hidden
+      />
 
-      <h1 className="animate-fade-up relative text-center font-display text-[clamp(2.5rem,7vw,5rem)] font-semibold leading-[0.95] tracking-tight text-stone-900 [animation-delay:80ms]">
-        <span className="block">Repository to</span>
-        <span className="mt-1 block bg-gradient-to-r from-teal-800 via-teal-700 to-amber-700 bg-clip-text text-transparent">
-          graph
-        </span>
-      </h1>
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col justify-end px-4 pb-16 pt-10 sm:px-6 sm:pb-20 lg:justify-center lg:pb-24">
+        <div className="max-w-4xl">
+          <p className="animate-fade-up font-mono text-[11px] uppercase tracking-[0.28em] text-wire-mute">
+            Knowledge graphs from source
+          </p>
 
-      <p className="animate-fade-up relative mt-5 max-w-xl text-center text-base leading-relaxed text-stone-600 sm:text-lg [animation-delay:140ms]">
-        Paste any GitHub link. Haywire clones it, parses the code with tree-sitter
-        (no LLM), and renders an interactive force-directed knowledge graph.
-      </p>
+          <h1 className="animate-brand-in mt-4 font-display text-[clamp(3.5rem,14vw,9.5rem)] font-extrabold leading-[0.82] tracking-[-0.04em] text-wire-ink">
+            Haywire
+          </h1>
 
-      <form
-        onSubmit={onSubmit}
-        className="animate-fade-up relative mt-8 w-full max-w-2xl [animation-delay:200ms]"
-      >
-        <div className="flex flex-col gap-3 rounded-2xl border border-stone-300/80 bg-white p-2 shadow-[0_20px_50px_-28px_rgba(28,25,23,0.45)] sm:flex-row sm:items-center">
-          <div className="flex flex-1 items-center gap-2 px-3">
-            <span className="hidden font-mono text-xs text-stone-400 sm:inline">github.com/</span>
-            <input
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="owner/repo or full GitHub URL"
-              className="w-full bg-transparent py-3 text-sm text-stone-900 outline-none placeholder:text-stone-400 sm:text-base"
-              aria-label="GitHub repository"
-            />
-          </div>
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-stone-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+          <p className="animate-fade-up mt-6 max-w-md text-lg leading-snug text-wire-mute sm:text-xl [animation-delay:180ms]">
+            Paste a GitHub repo. Watch the codebase untangle into a live, clickable graph.
+          </p>
+
+          <form
+            onSubmit={onSubmit}
+            className="animate-fade-up mt-10 max-w-xl [animation-delay:280ms]"
           >
-            Graph
-            <ArrowRight className="h-4 w-4" />
-          </button>
+            <div
+              className={`flex flex-col gap-2 border-2 bg-wire-paper/90 p-2 backdrop-blur-sm transition sm:flex-row sm:items-stretch ${
+                focused ? "border-wire-ink" : "border-wire-ink/20"
+              }`}
+            >
+              <label className="flex flex-1 items-center gap-2 px-3">
+                <span className="hidden shrink-0 font-mono text-xs text-wire-mute sm:inline">
+                  github.com/
+                </span>
+                <input
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  placeholder="owner/repo"
+                  className="w-full bg-transparent py-3 text-base text-wire-ink outline-none placeholder:text-wire-mute/70"
+                  aria-label="GitHub repository"
+                />
+              </label>
+              <button
+                type="submit"
+                className="group inline-flex items-center justify-center gap-2 bg-wire-signal px-6 py-3 text-sm font-extrabold uppercase tracking-wide text-wire-ink transition hover:bg-wire-signalDeep"
+              >
+                Graph it
+                <ArrowUpRight className="h-4 w-4 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </button>
+            </div>
+            {error && <p className="mt-2 text-sm text-wire-ember">{error}</p>}
+          </form>
         </div>
-        {error && <p className="mt-2 text-center text-sm text-red-600">{error}</p>}
-      </form>
 
-      <div className="animate-fade-up relative mt-6 flex flex-wrap items-center justify-center gap-2 [animation-delay:260ms]">
-        <span className="mr-1 text-sm text-stone-500">Try these:</span>
-        {EXAMPLES.map((ex) => (
-          <button
-            key={`${ex.owner}/${ex.repo}`}
-            type="button"
-            onClick={() => router.push(`/${ex.owner}/${ex.repo}`)}
-            className="rounded-full border border-stone-300 bg-white/80 px-3 py-1.5 text-sm font-medium text-stone-700 shadow-sm transition hover:border-teal-700/40 hover:text-teal-900"
-          >
-            {ex.label}
-          </button>
-        ))}
+        <div className="animate-fade-up mt-14 flex flex-wrap items-baseline gap-x-5 gap-y-2 border-t border-wire-ink/10 pt-6 [animation-delay:380ms]">
+          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-wire-mute">
+            Jump in
+          </span>
+          {EXAMPLES.map((ex) => (
+            <button
+              key={`${ex.owner}/${ex.repo}`}
+              type="button"
+              onClick={() => router.push(`/${ex.owner}/${ex.repo}`)}
+              className="font-display text-lg font-bold tracking-tight text-wire-ink underline decoration-wire-signal decoration-2 underline-offset-4 transition hover:decoration-wire-ember"
+            >
+              {ex.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <p className="animate-fade-in relative mt-10 max-w-md text-center text-sm text-stone-500 [animation-delay:400ms]">
-        Open any repo at <span className="font-mono text-stone-700">/owner/repo</span> to
-        explore its knowledge graph.
-      </p>
+      <div
+        className="pointer-events-none absolute bottom-6 right-6 hidden items-center gap-2 sm:flex"
+        aria-hidden
+      >
+        <span className="h-2 w-2 animate-signal-pulse rounded-sm bg-wire-signal" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.24em] text-wire-mute">
+          Live wire
+        </span>
+      </div>
     </section>
   );
 }

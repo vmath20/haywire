@@ -114,30 +114,30 @@ export function DiagramWorkspace({ owner, repo }: Props) {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-3.5rem)] max-w-[1400px] flex-col px-3 py-3 sm:px-5">
+    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-[1400px] flex-col px-3 py-3 sm:px-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-sm text-stone-500">
-            <Link href="/" className="hover:text-stone-800">
+          <div className="flex items-center gap-2 text-sm text-wire-mute">
+            <Link href="/" className="hover:text-wire-ink">
               Home
             </Link>
             <span>/</span>
-            <span className="font-mono text-stone-800">
+            <span className="font-mono text-wire-ink">
               {owner}/{repo}
             </span>
             <a
               href={`https://github.com/${owner}/${repo}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-teal-800 hover:underline"
+              className="inline-flex items-center gap-1 text-wire-ink underline decoration-wire-signal decoration-2 underline-offset-2"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               GitHub
             </a>
           </div>
-          <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-stone-900 sm:text-3xl">
+          <h1 className="mt-1 font-display text-2xl font-extrabold tracking-tight text-wire-ink sm:text-3xl">
             {owner}/{repo}{" "}
-            <span className="text-stone-400">Graph</span>
+            <span className="text-wire-mute">Graph</span>
           </h1>
         </div>
 
@@ -146,7 +146,7 @@ export function DiagramWorkspace({ owner, repo }: Props) {
             type="button"
             onClick={() => void runAnalyze(true)}
             disabled={stage === "loading"}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 shadow-sm transition hover:bg-stone-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 border border-wire-ink/15 bg-wire-paper px-3 py-2 text-sm font-semibold text-wire-ink transition hover:border-wire-ink/40 disabled:opacity-50"
           >
             <RefreshCw className={clsx("h-4 w-4", stage === "loading" && "animate-spin")} />
             Regenerate
@@ -155,7 +155,7 @@ export function DiagramWorkspace({ owner, repo }: Props) {
             type="button"
             onClick={exportJson}
             disabled={!result}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 shadow-sm transition hover:bg-stone-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 border border-wire-ink/15 bg-wire-paper px-3 py-2 text-sm font-semibold text-wire-ink transition hover:border-wire-ink/40 disabled:opacity-50"
           >
             <Download className="h-4 w-4" />
             Export
@@ -164,10 +164,10 @@ export function DiagramWorkspace({ owner, repo }: Props) {
             type="button"
             onClick={() => setZoomEnabled((z) => !z)}
             className={clsx(
-              "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition",
+              "inline-flex items-center gap-1.5 border px-3 py-2 text-sm font-semibold transition",
               zoomEnabled
-                ? "border-teal-700/30 bg-teal-50 text-teal-900"
-                : "border-stone-300 bg-white text-stone-800 hover:bg-stone-50",
+                ? "border-wire-ink bg-wire-signal text-wire-ink"
+                : "border-wire-ink/15 bg-wire-paper text-wire-ink hover:border-wire-ink/40",
             )}
           >
             <ZoomIn className="h-4 w-4" />
@@ -177,7 +177,7 @@ export function DiagramWorkspace({ owner, repo }: Props) {
             <button
               type="button"
               onClick={() => setShowReport((v) => !v)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-800 shadow-sm transition hover:bg-stone-50"
+              className="inline-flex items-center gap-1.5 border border-wire-ink/15 bg-wire-paper px-3 py-2 text-sm font-semibold text-wire-ink transition hover:border-wire-ink/40"
             >
               Report
             </button>
@@ -185,20 +185,19 @@ export function DiagramWorkspace({ owner, repo }: Props) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-[0_24px_60px_-40px_rgba(28,25,23,0.5)]">
+      <div className="min-h-0 flex-1 overflow-hidden border-2 border-wire-ink/15 bg-wire-paper">
         {stage === "loading" && (
           <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-            <div className="relative">
-              <div className="h-16 w-16 animate-pulse-soft rounded-full bg-teal-100" />
-              <Loader2 className="absolute inset-0 m-auto h-8 w-8 animate-spin text-teal-800" />
+            <div className="relative grid h-14 w-14 place-items-center border-2 border-wire-ink bg-wire-signal">
+              <Loader2 className="h-6 w-6 animate-spin text-wire-ink" />
             </div>
             <div>
-              <p className="font-display text-xl font-semibold text-stone-900">
-                Building knowledge graph
+              <p className="font-display text-2xl font-extrabold text-wire-ink">
+                Untangling the wires
               </p>
-              <p className="mt-2 max-w-md text-sm text-stone-500">{statusMsg}</p>
-              <p className="mt-4 text-xs text-stone-400">
-                Code is parsed locally with tree-sitter — deterministic, no embeddings.
+              <p className="mt-2 max-w-md text-sm text-wire-mute">{statusMsg}</p>
+              <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.18em] text-wire-mute">
+                Tree-sitter AST · no embeddings
               </p>
             </div>
           </div>
@@ -206,13 +205,13 @@ export function DiagramWorkspace({ owner, repo }: Props) {
 
         {stage === "error" && (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-            <AlertCircle className="h-10 w-10 text-red-500" />
-            <p className="font-display text-xl font-semibold text-stone-900">Could not build graph</p>
-            <p className="max-w-lg text-sm text-stone-600">{error}</p>
+            <AlertCircle className="h-10 w-10 text-wire-ember" />
+            <p className="font-display text-2xl font-extrabold text-wire-ink">Could not build graph</p>
+            <p className="max-w-lg text-sm text-wire-mute">{error}</p>
             <button
               type="button"
               onClick={() => void runAnalyze(true)}
-              className="mt-2 rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white"
+              className="mt-2 bg-wire-ink px-4 py-2 text-sm font-semibold text-wire-paper"
             >
               Try again
             </button>
@@ -222,20 +221,20 @@ export function DiagramWorkspace({ owner, repo }: Props) {
         {stage === "ready" && result && (
           <div className="flex h-full min-h-0 flex-col">
             {result.summary.god_nodes?.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 border-b border-stone-100 px-4 py-2.5 text-xs">
-                <span className="font-semibold uppercase tracking-wide text-stone-400">
+              <div className="flex flex-wrap items-center gap-2 border-b border-wire-ink/10 px-4 py-2.5 text-xs">
+                <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-wire-mute">
                   Hub nodes
                 </span>
                 {result.summary.god_nodes.slice(0, 6).map((g) => (
                   <span
                     key={g.id}
-                    className="rounded-full bg-stone-100 px-2.5 py-1 font-mono text-stone-700"
+                    className="border border-wire-ink/10 bg-wire-mist/40 px-2.5 py-1 font-mono text-wire-ink"
                     title={`degree ${g.degree}`}
                   >
                     {g.label}
                   </span>
                 ))}
-                <span className="ml-auto font-mono text-stone-400">
+                <span className="ml-auto font-mono text-wire-mute">
                   {result.summary.confidence.EXTRACTED || 0} EXTRACTED ·{" "}
                   {result.summary.confidence.INFERRED || 0} INFERRED
                 </span>
@@ -249,19 +248,19 @@ export function DiagramWorkspace({ owner, repo }: Props) {
       </div>
 
       {showReport && result?.report && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-4 sm:items-center">
-          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-wire-ink/50 p-4 sm:items-center">
+          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto border-2 border-wire-ink bg-wire-paper p-6">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-display text-xl font-semibold">Report</h2>
+              <h2 className="font-display text-xl font-extrabold">Report</h2>
               <button
                 type="button"
                 onClick={() => setShowReport(false)}
-                className="rounded-lg px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100"
+                className="px-3 py-1.5 text-sm text-wire-mute hover:text-wire-ink"
               >
                 Close
               </button>
             </div>
-            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-stone-700">
+            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-wire-ink/80">
               {result.report}
             </pre>
           </div>
