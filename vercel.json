@@ -9,8 +9,7 @@
     },
     "api": {
       "root": "backend",
-      "runtime": "container",
-      "framework": "fastapi"
+      "runtime": "container"
     }
   },
   "rewrites": [
