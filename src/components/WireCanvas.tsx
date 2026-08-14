@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 type Node = { x: number; y: number; vx: number; vy: number; r: number };
 type Edge = { a: number; b: number };
 
-/** Full-bleed animated knowledge-graph plane for the hero. */
+/** Animated knowledge-graph plane — sized to its parent, not the window. */
 export function WireCanvas() {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -14,6 +14,8 @@ export function WireCanvas() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
 
     let raf = 0;
     let nodes: Node[] = [];
@@ -24,15 +26,16 @@ export function WireCanvas() {
 
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
-      w = window.innerWidth;
-      h = window.innerHeight;
+      const rect = parent!.getBoundingClientRect();
+      w = Math.max(1, Math.floor(rect.width));
+      h = Math.max(1, Math.floor(rect.height));
       canvas!.width = Math.floor(w * dpr);
       canvas!.height = Math.floor(h * dpr);
       canvas!.style.width = `${w}px`;
       canvas!.style.height = `${h}px`;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const count = Math.min(48, Math.floor((w * h) / 28000));
+      const count = Math.min(48, Math.max(12, Math.floor((w * h) / 28000)));
       nodes = Array.from({ length: count }, () => ({
         x: Math.random() * w,
         y: Math.random() * h,
@@ -46,7 +49,6 @@ export function WireCanvas() {
           if (Math.random() > 0.92) edges.push({ a: i, b: j });
         }
       }
-      // Ensure connectivity density
       while (edges.length < count * 1.4) {
         const a = Math.floor(Math.random() * count);
         let b = Math.floor(Math.random() * count);
@@ -66,7 +68,6 @@ export function WireCanvas() {
         if (n.y > h + 20) n.y = -20;
       }
 
-      // Dynamic near edges
       ctx!.lineWidth = 1;
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
@@ -86,7 +87,6 @@ export function WireCanvas() {
         }
       }
 
-      // Fixed structural edges in signal color
       for (const e of edges) {
         const a = nodes[e.a];
         const b = nodes[e.b];
@@ -119,10 +119,11 @@ export function WireCanvas() {
 
     resize();
     tick();
-    window.addEventListener("resize", resize);
+    const ro = new ResizeObserver(() => resize());
+    ro.observe(parent);
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
+      ro.disconnect();
     };
   }, []);
 
@@ -130,7 +131,7 @@ export function WireCanvas() {
     <canvas
       ref={ref}
       aria-hidden
-      className="pointer-events-none absolute inset-0 z-0 opacity-80 animate-drift"
+      className="pointer-events-none absolute inset-0 z-0 opacity-70 animate-drift"
     />
   );
 }

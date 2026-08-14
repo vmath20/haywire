@@ -1,0 +1,14 @@
+---
+description: Always deploy Haywire to Vercel production after making changes
+alwaysApply: true
+---
+
+# Always deploy
+
+After completing any code or asset changes in this project, deploy to Vercel production without waiting to be asked:
+
+```bash
+npx vercel --prod --yes
+```
+
+Confirm with the live URL when the deploy finishes (https://haywire-omega.vercel.app).

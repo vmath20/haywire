@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Download,
@@ -10,95 +10,269 @@ import {
   ExternalLink,
   AlertCircle,
 } from "lucide-react";
+import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { api } from "@convex/_generated/api";
+import type { Id } from "@convex/_generated/dataModel";
 import { GraphViewer } from "@/components/GraphViewer";
 import type { AnalyzeResult } from "@/lib/types";
 import { apiUrl } from "@/lib/api";
+import { persistGraphArtifacts } from "@/lib/persistGraph";
+import { normalizeAnalyzePayload } from "@/lib/normalizeAnalyze";
 import clsx from "clsx";
 
 type Props = {
   owner: string;
   repo: string;
+  /** When true, fill the dashboard content pane (no marketing header offset). */
+  embedded?: boolean;
 };
 
 type Stage = "idle" | "loading" | "ready" | "error";
 
-export function DiagramWorkspace({ owner, repo }: Props) {
+export function DiagramWorkspace({ owner, repo, embedded = false }: Props) {
   const [stage, setStage] = useState<Stage>("idle");
   const [statusMsg, setStatusMsg] = useState("Preparing…");
   const [result, setResult] = useState<AnalyzeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoomEnabled, setZoomEnabled] = useState(true);
   const [showReport, setShowReport] = useState(false);
+  const [forceNonce, setForceNonce] = useState(0);
+  const { isAuthenticated } = useConvexAuth();
+  const savedRecord = useQuery(
+    api.graphs.getByRepo,
+    isAuthenticated ? { owner, repo } : "skip",
+  );
+  const exampleRecord = useQuery(api.examples.getByRepo, { owner, repo });
+  const generateUploadUrl = useMutation(api.graphs.generateUploadUrl);
+  const saveGraph = useMutation(api.graphs.save);
+  const touchGraph = useMutation(api.graphs.touch);
+  const persistedKey = useRef<string | null>(null);
 
-  const runAnalyze = useCallback(
-    async (force = false) => {
+  const persistFull = useCallback(
+    async (data: AnalyzeResult) => {
+      if (!isAuthenticated) return;
+      const key = `${data.owner}/${data.repo}:${data.summary.node_count}:${data.summary.edge_count}`;
+      if (persistedKey.current === key) return;
+      try {
+        await persistGraphArtifacts({
+          result: data,
+          generateUploadUrl: async () => generateUploadUrl(),
+          save: async (args) =>
+            saveGraph({
+              ...args,
+              graphStorageId: args.graphStorageId as Id<"_storage"> | undefined,
+              reportStorageId: args.reportStorageId as Id<"_storage"> | undefined,
+              thumbnailStorageId: args.thumbnailStorageId as Id<"_storage"> | undefined,
+            }),
+        });
+        persistedKey.current = key;
+      } catch {
+        // Non-blocking
+      }
+    },
+    [generateUploadUrl, isAuthenticated, saveGraph],
+  );
+
+  const runBackendAnalyze = useCallback(
+    async (force: boolean) => {
+      setStatusMsg(force ? "Regenerating graph…" : "Starting analysis…");
+
+      if (!force) {
+        const cached = await fetch(apiUrl(`/graph/${owner}/${repo}`));
+        if (cached.ok) {
+          const data = (await cached.json()) as AnalyzeResult;
+          setResult(data);
+          setStage("ready");
+          setStatusMsg("Loaded from API cache");
+          void persistFull(data);
+          return;
+        }
+      }
+
+      const start = await fetch(apiUrl("/analyze"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: `${owner}/${repo}`,
+          force,
+          code_only: true,
+        }),
+      });
+      if (!start.ok) {
+        const err = await start.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to start analysis");
+      }
+      const { job_id } = (await start.json()) as { job_id: string };
+
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 700));
+        const res = await fetch(apiUrl(`/jobs/${job_id}`));
+        if (!res.ok) throw new Error("Lost job status");
+        const job = await res.json();
+        const events = job.events as { event: string; message?: string; stage?: string }[];
+        const lastStatus = [...events].reverse().find((e) => e.event === "status");
+        if (lastStatus?.message) setStatusMsg(lastStatus.message);
+
+        if (job.status === "done") {
+          // Multi-instance: retry job-local graph, then disk/memory cache.
+          for (let attempt = 0; attempt < 40; attempt++) {
+            const fromJob = await fetch(apiUrl(`/jobs/${job_id}/graph`));
+            if (fromJob.ok) {
+              const data = (await fromJob.json()) as AnalyzeResult;
+              setResult(data);
+              setStage("ready");
+              void persistFull(data);
+              return;
+            }
+            const graphRes = await fetch(apiUrl(`/graph/${owner}/${repo}`));
+            if (graphRes.ok) {
+              const data = (await graphRes.json()) as AnalyzeResult;
+              setResult(data);
+              setStage("ready");
+              void persistFull(data);
+              return;
+            }
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          throw new Error("Graph built but could not be loaded from cache");
+        }
+        if (job.status === "error") {
+          throw new Error(job.error?.message || "Graph build failed");
+        }
+        // "pending" = wrong replica; keep polling
+      }
+    },
+    [owner, persistFull, repo],
+  );
+
+  // The boot effect must run once per repo (or explicit regenerate), NOT on
+  // every savedRecord/exampleRecord update: booting itself saves artifacts and
+  // touches lastViewedAt, which changes those reactive queries and would
+  // otherwise re-trigger the effect in an endless regenerate loop.
+  const bootedKey = useRef<string | null>(null);
+  const bootGen = useRef(0);
+
+  useEffect(() => {
+    const gen = bootGen.current;
+    return () => {
+      // Invalidate in-flight boots on unmount only.
+      if (bootGen.current === gen) bootGen.current++;
+    };
+  }, []);
+
+  useEffect(() => {
+    const force = forceNonce > 0;
+    const key = `${owner}/${repo}:${forceNonce}`;
+
+    // Still waiting on Convex queries — show progress but don't boot yet.
+    if (isAuthenticated && !force && savedRecord === undefined) {
+      setStage("loading");
+      setStatusMsg("Checking saved graphs…");
+      return;
+    }
+    if (!force && !savedRecord?.graphUrl && exampleRecord === undefined) {
+      setStage("loading");
+      setStatusMsg("Checking example library…");
+      return;
+    }
+
+    if (bootedKey.current === key) return;
+    bootedKey.current = key;
+    const myGen = ++bootGen.current;
+    const cancelled = () => bootGen.current !== myGen;
+
+    async function boot() {
       setStage("loading");
       setError(null);
-      setStatusMsg(force ? "Regenerating graph…" : "Starting analysis…");
       setResult(null);
+      setStatusMsg("Preparing…");
+      persistedKey.current = null;
 
       try {
-        // Try cached graph first when not forcing
-        if (!force) {
-          const cached = await fetch(apiUrl(`/graph/${owner}/${repo}`));
-          if (cached.ok) {
-            const data = (await cached.json()) as AnalyzeResult;
-            setResult(data);
-            setStage("ready");
-            setStatusMsg("Loaded from cache");
-            return;
+        if (!force && savedRecord?.graphUrl) {
+          setStatusMsg("Loading your saved graph…");
+          const res = await fetch(savedRecord.graphUrl);
+          if (!res.ok) throw new Error("Could not load saved graph");
+          const data = (await res.json()) as AnalyzeResult;
+          if (cancelled()) return;
+          setResult(data);
+          setStage("ready");
+          setStatusMsg("Loaded from your library");
+          persistedKey.current = `${data.owner}/${data.repo}:${data.summary.node_count}:${data.summary.edge_count}`;
+          void touchGraph({ owner, repo });
+          if (!savedRecord.thumbnailUrl || !savedRecord.hasArtifact) {
+            void persistFull(data);
           }
+          return;
         }
 
-        const start = await fetch(apiUrl("/analyze"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: `${owner}/${repo}`,
-            force,
-            code_only: true,
-          }),
-        });
-        if (!start.ok) {
-          const err = await start.json().catch(() => ({}));
-          throw new Error(err.detail || "Failed to start analysis");
-        }
-        const { job_id } = (await start.json()) as { job_id: string };
-
-        // Poll job status
-        for (;;) {
-          await new Promise((r) => setTimeout(r, 700));
-          const res = await fetch(apiUrl(`/jobs/${job_id}`));
-          if (!res.ok) throw new Error("Lost job status");
-          const job = await res.json();
-          const events = job.events as { event: string; message?: string; stage?: string }[];
-          const lastStatus = [...events].reverse().find((e) => e.event === "status");
-          if (lastStatus?.message) setStatusMsg(lastStatus.message);
-
-          if (job.status === "done") {
-            const graphRes = await fetch(apiUrl(`/graph/${owner}/${repo}`));
-            if (!graphRes.ok) {
-              throw new Error("Graph built but could not be loaded from cache");
-            }
-            setResult((await graphRes.json()) as AnalyzeResult);
-            setStage("ready");
-            return;
+        if (!force && exampleRecord?.graphUrl) {
+          setStatusMsg("Loading prebuilt example…");
+          // Prefer compact display subset when available (large repos).
+          const viewUrl = exampleRecord.displayGraphUrl || exampleRecord.graphUrl;
+          const usingSubset = Boolean(exampleRecord.displayGraphUrl);
+          if (usingSubset) {
+            setStatusMsg("Loading display graph…");
           }
-          if (job.status === "error") {
-            throw new Error(job.error?.message || "Graph build failed");
+          const res = await fetch(viewUrl);
+          if (!res.ok) throw new Error("Could not load example graph");
+          const raw = await res.json();
+          const reportText = exampleRecord.reportUrl
+            ? await fetch(exampleRecord.reportUrl)
+                .then((r) => (r.ok ? r.text() : null))
+                .catch(() => null)
+            : null;
+          let data = normalizeAnalyzePayload(raw, {
+            owner,
+            repo,
+            nodeCount: exampleRecord.nodeCount,
+            edgeCount: exampleRecord.edgeCount,
+            communityCount: exampleRecord.communityCount,
+            report: reportText,
+          });
+          // Client-side downsample as last resort if full blob was served
+          if (!usingSubset && (data.graph.nodes?.length || 0) > 3500) {
+            setStatusMsg("Preparing display subset…");
+            const { buildDisplaySubset } = await import("@/lib/displayGraph");
+            data = buildDisplaySubset(data);
           }
+          if (cancelled()) return;
+          setResult(data);
+          setStage("ready");
+          setStatusMsg(
+            usingSubset || data.meta?.display_subset
+              ? `Loaded display graph (${data.summary.node_count.toLocaleString()} of ${(exampleRecord.nodeCount ?? data.summary.node_count).toLocaleString()} nodes)`
+              : "Loaded prebuilt example",
+          );
+          persistedKey.current = `${data.owner}/${data.repo}:${data.summary.node_count}:${data.summary.edge_count}`;
+          // Avoid copying very large example artifacts into every user's library
+          if ((exampleRecord.nodeCount ?? data.summary.node_count) < 20000 && !data.meta?.display_subset) {
+            void persistFull(data);
+          }
+          return;
         }
+
+        await runBackendAnalyze(force);
       } catch (e) {
+        if (cancelled()) return;
         setStage("error");
         setError(e instanceof Error ? e.message : "Unexpected error");
       }
-    },
-    [owner, repo],
-  );
+    }
 
-  useEffect(() => {
-    void runAnalyze(false);
-  }, [runAnalyze]);
+    void boot();
+  }, [
+    exampleRecord,
+    forceNonce,
+    isAuthenticated,
+    owner,
+    persistFull,
+    repo,
+    runBackendAnalyze,
+    savedRecord,
+    touchGraph,
+  ]);
 
   function exportJson() {
     if (!result) return;
@@ -113,13 +287,24 @@ export function DiagramWorkspace({ owner, repo }: Props) {
     URL.revokeObjectURL(url);
   }
 
+  function regenerate() {
+    setForceNonce((n) => n + 1);
+  }
+
   return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-[1400px] flex-col px-3 py-3 sm:px-5">
+    <div
+      className={clsx(
+        "flex min-h-0 flex-col",
+        embedded
+          ? "h-full w-full px-3 py-3 sm:px-4"
+          : "mx-auto h-[calc(100vh-4rem)] max-w-[1400px] px-3 py-3 sm:px-5",
+      )}
+    >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm text-wire-mute">
-            <Link href="/" className="hover:text-wire-ink">
-              Home
+            <Link href="/dashboard" className="hover:text-wire-ink">
+              Graphs
             </Link>
             <span>/</span>
             <span className="font-mono text-wire-ink">
@@ -144,7 +329,7 @@ export function DiagramWorkspace({ owner, repo }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void runAnalyze(true)}
+            onClick={() => regenerate()}
             disabled={stage === "loading"}
             className="inline-flex items-center gap-1.5 border border-wire-ink/15 bg-wire-paper px-3 py-2 text-sm font-semibold text-wire-ink transition hover:border-wire-ink/40 disabled:opacity-50"
           >
@@ -210,7 +395,7 @@ export function DiagramWorkspace({ owner, repo }: Props) {
             <p className="max-w-lg text-sm text-wire-mute">{error}</p>
             <button
               type="button"
-              onClick={() => void runAnalyze(true)}
+              onClick={() => regenerate()}
               className="mt-2 bg-wire-ink px-4 py-2 text-sm font-semibold text-wire-paper"
             >
               Try again

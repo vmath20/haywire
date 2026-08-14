@@ -1,42 +1,30 @@
 import type { Metadata } from "next";
-import { Syne, Manrope, IBM_Plex_Mono } from "next/font/google";
+import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import "./globals.css";
-import { SiteHeader } from "@/components/SiteHeader";
-
-const display = Syne({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["600", "700", "800"],
-});
-
-const sans = Manrope({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  weight: ["400", "500", "600", "700", "800"],
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  weight: ["400", "500"],
-});
+import { AppChrome } from "@/components/AppChrome";
+import { ConvexClientProvider } from "./ConvexClientProvider";
 
 export const metadata: Metadata = {
   title: "Haywire — Repository to knowledge graph",
   description:
     "Turn any GitHub repository into an interactive knowledge graph. Paste a link, get communities, hub nodes, and EXTRACTED/INFERRED edges.",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-touch-icon.png" }],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
-      <body className="font-sans antialiased">
-        <div className="noise" aria-hidden />
-        <div className="relative z-10 flex min-h-screen flex-col">
-          <SiteHeader />
-          <main className="flex-1">{children}</main>
-        </div>
-      </body>
-    </html>
+    <ConvexAuthNextjsServerProvider>
+      <html lang="en">
+        <body className="font-sans antialiased">
+          <ConvexClientProvider>
+            <div className="noise" aria-hidden />
+            <AppChrome>{children}</AppChrome>
+          </ConvexClientProvider>
+        </body>
+      </html>
+    </ConvexAuthNextjsServerProvider>
   );
 }

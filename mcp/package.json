@@ -1,0 +1,45 @@
+{
+  "name": "haywire-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Haywire code knowledge graphs as tools: find_symbol, who_calls, trace_path, explain_module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vmath20/haywire.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://haywire-omega.vercel.app",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-graph",
+    "knowledge-graph",
+    "haywire",
+    "cursor",
+    "claude-code"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module",
+  "bin": {
+    "haywire-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prepublishOnly": "tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

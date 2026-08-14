@@ -11,7 +11,7 @@ const config: Config = {
       colors: {
         wire: {
           ink: "#0b0d10",
-          paper: "#eef1f4",
+          paper: "#ffffff",
           mist: "#d7dde5",
           mute: "#5c6775",
           line: "#c5ced8",
@@ -21,9 +21,10 @@ const config: Config = {
         },
       },
       fontFamily: {
-        display: ["var(--font-display)", "Futura", "sans-serif"],
-        sans: ["var(--font-sans)", "Helvetica Neue", "sans-serif"],
-        mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+        display: ["var(--font-display)", "Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
+        sans: ["var(--font-sans)", "Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
+        mono: ["var(--font-mono)", "Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
+        serif: ["var(--font-serif)", "Helvetica Neue", "Helvetica", "Arial", "sans-serif"],
       },
       animation: {
         "fade-up": "fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) both",

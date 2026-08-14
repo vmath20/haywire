@@ -7,8 +7,10 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
+import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Iterator
@@ -24,6 +26,10 @@ REPOS_DIR = DATA_DIR / "repos"
 CACHE_DIR = DATA_DIR / "cache"
 JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+BUILD_LOCK = threading.Lock()
+# In-memory graph results so /graph and /jobs/{id}/graph work even if disk is flaky.
+# (Still per-instance — clients should prefer /jobs/{id}/graph right after build.)
+MEMORY_GRAPHS: dict[str, dict[str, Any]] = {}
 
 GITHUB_RE = re.compile(
     r"^(?:https?://)?(?:www\.)?github\.com/"
@@ -32,7 +38,7 @@ GITHUB_RE = re.compile(
 OWNER_REPO_RE = re.compile(r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)$")
 
 MAX_CLONE_DEPTH = 1
-EXTRACT_TIMEOUT = int(os.environ.get("HAYWIRE_EXTRACT_TIMEOUT", "300"))
+EXTRACT_TIMEOUT = int(os.environ.get("HAYWIRE_EXTRACT_TIMEOUT", "600"))
 
 app = FastAPI(title="Haywire", version="1.0.0")
 
@@ -74,6 +80,16 @@ class AnalyzeRequest(BaseModel):
     url: str = Field(..., description="GitHub URL or owner/repo")
     force: bool = False
     code_only: bool = True
+
+
+class QueryRequest(BaseModel):
+    owner: str
+    repo: str
+    question: str = Field(..., min_length=2, max_length=2000)
+    budget: int = Field(default=2000, ge=200, le=8000)
+    dfs: bool = False
+    """Optional HTTPS URL to a graph JSON blob (e.g. Convex storage) when API cache misses."""
+    graph_url: str | None = None
 
 
 def parse_github(url: str) -> tuple[str, str]:
@@ -190,6 +206,12 @@ def summarize_graph(graph: dict[str, Any], report_md: str | None = None) -> dict
 
 
 def load_cached(owner: str, repo: str) -> dict[str, Any] | None:
+    key = cache_key(owner, repo)
+    with JOBS_LOCK:
+        mem = MEMORY_GRAPHS.get(key)
+        if mem:
+            return {**mem, "cached": True}
+
     base = cache_path(owner, repo)
     graph_file = base / "graph.json"
     if not graph_file.exists():
@@ -203,7 +225,7 @@ def load_cached(owner: str, repo: str) -> dict[str, Any] | None:
     )
     meta_file = base / "meta.json"
     meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
-    return {
+    payload = {
         "owner": owner,
         "repo": repo,
         "cached": True,
@@ -212,9 +234,26 @@ def load_cached(owner: str, repo: str) -> dict[str, Any] | None:
         "report": report,
         "meta": meta,
     }
+    with JOBS_LOCK:
+        MEMORY_GRAPHS[key] = payload
+    return payload
+
+
+def remember_graph(job_id: str, payload: dict[str, Any]) -> None:
+    key = cache_key(str(payload["owner"]), str(payload["repo"]))
+    with JOBS_LOCK:
+        MEMORY_GRAPHS[key] = payload
+        job = JOBS.get(job_id)
+        if job is not None:
+            job["full"] = payload
 
 
 def build_graph(job_id: str, owner: str, repo: str, force: bool, code_only: bool) -> None:
+    with BUILD_LOCK:
+        _build_graph_locked(job_id, owner, repo, force, code_only)
+
+
+def _build_graph_locked(job_id: str, owner: str, repo: str, force: bool, code_only: bool) -> None:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         REPOS_DIR.mkdir(parents=True, exist_ok=True)
@@ -224,6 +263,7 @@ def build_graph(job_id: str, owner: str, repo: str, force: bool, code_only: bool
             cached = load_cached(owner, repo)
             if cached:
                 emit(job_id, "status", {"message": "Loaded cached graph", "stage": "cache"})
+                remember_graph(job_id, {**cached, "cached": True})
                 emit(
                     job_id,
                     "done",
@@ -243,12 +283,14 @@ def build_graph(job_id: str, owner: str, repo: str, force: bool, code_only: bool
 
         emit(job_id, "status", {"message": f"Cloning {owner}/{repo}…", "stage": "clone"})
         if dest.exists():
-            shutil.rmtree(dest)
+            shutil.rmtree(dest, ignore_errors=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             run_cmd([*extractor, "clone", github_url, "--out", str(dest)], timeout=120)
         except Exception:
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
             run_cmd(
                 [
                     "git",
@@ -321,6 +363,25 @@ def build_graph(job_id: str, owner: str, repo: str, force: bool, code_only: bool
         }
         (cache / "meta.json").write_text(json.dumps(meta, indent=2))
 
+        # Free disk ASAP — keep only the compact cache, not the full clone.
+        try:
+            if dest.exists():
+                shutil.rmtree(dest)
+        except Exception:
+            pass
+
+        summary = summarize_graph(graph, report)
+        full = {
+            "owner": owner,
+            "repo": repo,
+            "cached": False,
+            "graph": graph,
+            "summary": summary,
+            "report": report,
+            "meta": meta,
+        }
+        remember_graph(job_id, full)
+
         emit(
             job_id,
             "done",
@@ -328,13 +389,25 @@ def build_graph(job_id: str, owner: str, repo: str, force: bool, code_only: bool
                 "owner": owner,
                 "repo": repo,
                 "cached": False,
-                "summary": summarize_graph(graph, report),
+                "summary": summary,
                 "meta": meta,
             },
         )
     except subprocess.TimeoutExpired:
+        try:
+            dest = repo_path(owner, repo)
+            if dest.exists():
+                shutil.rmtree(dest)
+        except Exception:
+            pass
         emit(job_id, "error", {"message": "Timed out while building the graph. Try a smaller repository."})
     except Exception as exc:
+        try:
+            dest = repo_path(owner, repo)
+            if dest.exists():
+                shutil.rmtree(dest)
+        except Exception:
+            pass
         emit(job_id, "error", {"message": sanitize_text(str(exc), 2000)})
 
 
@@ -363,7 +436,14 @@ def job_status(job_id: str) -> dict[str, Any]:
     with JOBS_LOCK:
         job = JOBS.get(job_id)
         if not job:
-            raise HTTPException(404, "Job not found")
+            # Multi-instance: this replica may not own the job — keep polling.
+            return {
+                "job_id": job_id,
+                "status": "pending",
+                "events": [],
+                "result": None,
+                "error": None,
+            }
         slim_events = [
             {
                 "event": ev.get("event"),
@@ -382,6 +462,7 @@ def job_status(job_id: str) -> dict[str, Any]:
                 for k in ("owner", "repo", "cached", "summary", "meta")
                 if k in job["result"]
             }
+            result["has_graph"] = bool(job.get("full"))
         if job["status"] == "error" and job["result"]:
             error = {"message": sanitize_text(str(job["result"].get("message", "error")), 2000)}
         return {
@@ -391,6 +472,16 @@ def job_status(job_id: str) -> dict[str, Any]:
             "result": result,
             "error": error,
         }
+
+
+@app.get("/jobs/{job_id}/graph")
+def job_graph(job_id: str) -> dict[str, Any]:
+    """Full AnalyzeResult for a completed job (same replica that built it)."""
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if not job or job["status"] != "done" or not job.get("full"):
+            raise HTTPException(404, "Graph not available on this instance yet")
+        return job["full"]
 
 
 @app.get("/jobs/{job_id}/stream")
@@ -432,9 +523,340 @@ def get_graph(owner: str, repo: str) -> dict[str, Any]:
 @app.get("/examples")
 def examples() -> list[dict[str, str]]:
     return [
-        {"owner": "karpathy", "repo": "nanoGPT", "label": "nanoGPT"},
-        {"owner": "pallets", "repo": "click", "label": "Click"},
-        {"owner": "psf", "repo": "requests", "label": "Requests"},
-        {"owner": "tiangolo", "repo": "fastapi", "label": "FastAPI"},
-        {"owner": "pallets", "repo": "flask", "label": "Flask"},
+        {"owner": "openclaw", "repo": "openclaw", "label": "OpenClaw"},
+        {"owner": "mermaid-js", "repo": "mermaid", "label": "Mermaid"},
+        {"owner": "karpathy", "repo": "nanochat", "label": "nanochat"},
+        {"owner": "agent0ai", "repo": "agent-zero", "label": "Agent Zero"},
+        {"owner": "langchain-ai", "repo": "langchain", "label": "LangChain"},
     ]
+
+
+ALLOWED_GRAPH_URL_HOSTS = (
+    "convex.cloud",
+    "haywire-omega.vercel.app",
+)
+
+
+def _allowed_graph_url(url: str) -> bool:
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            return False
+        host = (parsed.hostname or "").lower()
+        return any(host == h or host.endswith("." + h) for h in ALLOWED_GRAPH_URL_HOSTS)
+    except Exception:
+        return False
+
+
+def _knowledge_graph_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize AnalyzeResult or raw graphify JSON into a node-link graph dict."""
+    nested = payload.get("graph")
+    if (
+        isinstance(nested, dict)
+        and isinstance(nested.get("nodes"), list)
+        and "summary" in payload
+    ):
+        return nested
+    if isinstance(payload.get("nodes"), list) and isinstance(payload.get("links"), list):
+        return payload
+    raise ValueError("Unrecognized graph payload")
+
+
+def _materialize_graph_file(owner: str, repo: str, graph_url: str | None) -> tuple[Path, bool]:
+    """
+    Return (path_to_graph.json, is_temporary).
+    Prefers on-disk API cache, then in-memory build, then optional remote URL.
+    """
+    cached = cache_path(owner, repo) / "graph.json"
+    if cached.exists():
+        return cached, False
+
+    key = cache_key(owner, repo)
+    with JOBS_LOCK:
+        mem = MEMORY_GRAPHS.get(key)
+    if mem:
+        try:
+            kg = _knowledge_graph_from_payload(mem)
+        except ValueError:
+            kg = None
+        if kg:
+            tmp = Path(tempfile.mkdtemp(prefix="haywire-query-")) / "graph.json"
+            tmp.write_text(json.dumps(kg), encoding="utf-8")
+            return tmp, True
+
+    if graph_url:
+        if not _allowed_graph_url(graph_url):
+            raise HTTPException(400, "graph_url host is not allowed")
+        try:
+            req = urllib.request.Request(
+                graph_url,
+                headers={"User-Agent": "haywire-query/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                raw_bytes = resp.read()
+            payload = json.loads(raw_bytes.decode("utf-8"))
+            kg = _knowledge_graph_from_payload(payload)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(400, f"Could not load graph_url: {sanitize_text(str(exc), 300)}") from exc
+
+        tmp = Path(tempfile.mkdtemp(prefix="haywire-query-")) / "graph.json"
+        tmp.write_text(json.dumps(kg), encoding="utf-8")
+        return tmp, True
+
+    raise HTTPException(
+        404,
+        "No graph available for this repository. Open it from Graphs first, or pick an example.",
+    )
+
+
+def _run_graphify_query(
+    graph_file: Path, question: str, *, dfs: bool, budget: int
+) -> tuple[str, dict[str, Any]]:
+    """Run graphify traversal; return (text_context, structured_traversal)."""
+    try:
+        from networkx.readwrite import json_graph
+        from graphify.serve import (
+            _bfs,
+            _dfs,
+            _filter_graph_by_context,
+            _pick_seeds,
+            _query_terms,
+            _RELATIONAL_INTENT_TERMS,
+            _resolve_context_filters,
+            _score_query,
+            _subgraph_to_text,
+        )
+    except ImportError as exc:
+        extractor = find_extractor()
+        cmd = [*extractor, "query", question, "--graph", str(graph_file), "--budget", str(budget)]
+        if dfs:
+            cmd.append("--dfs")
+        try:
+            return run_cmd(cmd, timeout=120), {
+                "mode": "dfs" if dfs else "bfs",
+                "seeds": [],
+                "visit_order": [],
+                "edges": [],
+            }
+        except Exception as cli_exc:
+            raise RuntimeError(f"graphify query unavailable: {exc}; cli: {cli_exc}") from cli_exc
+
+    raw = json.loads(graph_file.read_text(encoding="utf-8"))
+    if "links" not in raw and "edges" in raw:
+        raw = dict(raw, links=raw["edges"])
+    raw = dict(
+        raw,
+        links=[
+            {
+                **link,
+                "_src": link.get("_src", link.get("source")),
+                "_tgt": link.get("_tgt", link.get("target")),
+            }
+            for link in raw.get("links", [])
+        ],
+    )
+    try:
+        G = json_graph.node_link_graph(raw, edges="links")
+    except TypeError:
+        G = json_graph.node_link_graph(raw)
+
+    mode = "dfs" if dfs else "bfs"
+    depth = 2
+    terms = _query_terms(question)
+    qs = _score_query(G, terms, collect_per_term_seeds=True)
+    best_seed_by_term = qs.best_seed_by_term
+    intent = {t for t in best_seed_by_term if t in _RELATIONAL_INTENT_TERMS}
+    if intent and any(t not in _RELATIONAL_INTENT_TERMS for t in terms):
+        best_seed_by_term = {
+            t: nid for t, nid in best_seed_by_term.items() if t not in intent
+        }
+    start_nodes = _pick_seeds(qs.ranked, G=G, best_seed_by_term=best_seed_by_term)
+    overview_fallback = False
+    if not start_nodes:
+        # Broad or follow-up questions ("how are the models processed?") often
+        # match no symbol names. Instead of returning empty evidence, seed the
+        # traversal from the most-connected nodes so the answer is grounded in
+        # the repo's actual core structure.
+        overview_fallback = True
+        try:
+            ranked_by_degree = sorted(G.degree, key=lambda kv: kv[1], reverse=True)
+            start_nodes = [nid for nid, _ in ranked_by_degree[:5]]
+        except Exception:
+            start_nodes = list(G.nodes)[:5]
+    if not start_nodes:
+        return "No matching nodes found.", {
+            "mode": mode,
+            "seeds": [],
+            "visit_order": [],
+            "edges": [],
+        }
+
+    resolved_filters, filter_source = _resolve_context_filters(question, None)
+    traversal_graph = _filter_graph_by_context(G, resolved_filters)
+    nodes, edges = (
+        _dfs(traversal_graph, start_nodes, depth)
+        if mode == "dfs"
+        else _bfs(traversal_graph, start_nodes, depth)
+    )
+
+    header_parts = [
+        f"Traversal: {mode.upper()} depth={depth}",
+        f"Start: {[G.nodes[n].get('label', n) for n in start_nodes]}",
+    ]
+    if overview_fallback:
+        header_parts.append(
+            "Note: question matched no symbol names; showing the repo's most-connected components instead"
+        )
+    if resolved_filters:
+        header_parts.append(f"Context: {', '.join(resolved_filters)} ({filter_source})")
+    header_parts.append(f"{len(nodes)} nodes found")
+    header = " | ".join(header_parts) + "\n\n"
+    text = header + _subgraph_to_text(
+        traversal_graph, nodes, edges, budget, seeds=start_nodes
+    )
+
+    # Reconstruct a stable visit order: seeds first, then edge-discovery order.
+    visit_ids: list[str] = []
+    seen: set[str] = set()
+    for nid in start_nodes:
+        if nid in nodes and nid not in seen:
+            visit_ids.append(nid)
+            seen.add(nid)
+    for edge in edges:
+        if not isinstance(edge, (tuple, list)) or len(edge) < 2:
+            continue
+        src, tgt = str(edge[0]), str(edge[1])
+        for nid in (src, tgt):
+            if nid in nodes and nid not in seen:
+                visit_ids.append(nid)
+                seen.add(nid)
+    for nid in nodes:
+        sid = str(nid)
+        if sid not in seen:
+            visit_ids.append(sid)
+            seen.add(sid)
+
+    # Cap payload size for the replay UI / Convex storage.
+    max_steps = 120
+    visit_ids = visit_ids[:max_steps]
+    visit_set = set(visit_ids)
+    seed_set = {str(s) for s in start_nodes}
+
+    # Approximate depth via BFS layers from seeds on the traversed edge list.
+    depth_map: dict[str, int] = {s: 0 for s in start_nodes if str(s) in visit_set}
+    frontier = [s for s in start_nodes if str(s) in visit_set]
+    hop = 0
+    adj: dict[str, list[str]] = {}
+    edge_payload: list[dict[str, str]] = []
+    for edge in edges:
+        if not isinstance(edge, (tuple, list)) or len(edge) < 2:
+            continue
+        a, b = str(edge[0]), str(edge[1])
+        if a not in visit_set or b not in visit_set:
+            continue
+        edge_payload.append({"from": a, "to": b})
+        adj.setdefault(a, []).append(b)
+        adj.setdefault(b, []).append(a)
+    while frontier and hop < depth + 2:
+        hop += 1
+        nxt: list[str] = []
+        for n in frontier:
+            for nb in adj.get(str(n), []):
+                if nb not in depth_map:
+                    depth_map[nb] = hop
+                    nxt.append(nb)
+        frontier = nxt
+
+    visit_order: list[dict[str, Any]] = []
+    for nid in visit_ids:
+        data = G.nodes.get(nid, {}) if nid in G.nodes else {}
+        visit_order.append(
+            {
+                "id": nid,
+                "label": sanitize_text(str(data.get("label") or nid), 120),
+                "depth": int(depth_map.get(nid, 0)),
+                "seed": nid in seed_set,
+                "source_file": sanitize_text(str(data.get("source_file") or ""), 240) or None,
+            }
+        )
+
+    traversal = {
+        "mode": mode,
+        "depth": depth,
+        "seeds": [str(s) for s in start_nodes],
+        "visit_order": visit_order,
+        "edges": edge_payload[: max_steps * 3],
+        "node_count": len(nodes),
+        "context_filters": resolved_filters or [],
+    }
+    return text, traversal
+
+
+@app.post("/query")
+def query_graph(req: QueryRequest) -> dict[str, Any]:
+    owner = req.owner.strip()
+    repo = req.repo.strip()
+    question = req.question.strip()
+    if not owner or not repo:
+        raise HTTPException(400, "owner and repo are required")
+    if not question:
+        raise HTTPException(400, "question is required")
+
+    graph_file: Path | None = None
+    temporary = False
+    try:
+        graph_file, temporary = _materialize_graph_file(owner, repo, req.graph_url)
+        started = time.time()
+        answer, traversal = _run_graphify_query(
+            graph_file,
+            question,
+            dfs=req.dfs,
+            budget=req.budget,
+        )
+        elapsed_ms = int((time.time() - started) * 1000)
+        graph_context = sanitize_text(answer)
+        return {
+            "owner": owner,
+            "repo": repo,
+            "question": question,
+            # Raw graphify traversal (also exposed as answer for older clients).
+            "graph_context": graph_context,
+            "answer": graph_context,
+            "traversal": traversal,
+            "mode": "dfs" if req.dfs else "bfs",
+            "budget": req.budget,
+            "elapsed_ms": elapsed_ms,
+            "llm_used": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, sanitize_text(str(exc), 800)) from exc
+    finally:
+        if temporary and graph_file is not None:
+            try:
+                shutil.rmtree(graph_file.parent, ignore_errors=True)
+            except Exception:
+                pass
+
+
+@app.post("/admin/cleanup")
+def cleanup_disk() -> dict[str, Any]:
+    """Remove cloned repos (and optionally all caches) to free container disk."""
+    removed_repos = 0
+    if REPOS_DIR.exists():
+        for child in list(REPOS_DIR.iterdir()):
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                    removed_repos += 1
+                else:
+                    child.unlink()
+                    removed_repos += 1
+            except Exception:
+                pass
+    return {"ok": True, "removed_repo_trees": removed_repos}

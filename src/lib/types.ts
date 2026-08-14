@@ -49,11 +49,11 @@ export type AnalyzeResult = {
 };
 
 export const EXAMPLES = [
-  { owner: "karpathy", repo: "nanoGPT", label: "nanoGPT" },
-  { owner: "pallets", repo: "click", label: "Click" },
-  { owner: "psf", repo: "requests", label: "Requests" },
-  { owner: "tiangolo", repo: "fastapi", label: "FastAPI" },
-  { owner: "pallets", repo: "flask", label: "Flask" },
+  { owner: "openclaw", repo: "openclaw", label: "OpenClaw" },
+  { owner: "mermaid-js", repo: "mermaid", label: "Mermaid" },
+  { owner: "karpathy", repo: "nanochat", label: "nanochat" },
+  { owner: "agent0ai", repo: "agent-zero", label: "Agent Zero" },
+  { owner: "langchain-ai", repo: "langchain", label: "LangChain" },
 ] as const;
 
 export const COMMUNITY_COLORS = [

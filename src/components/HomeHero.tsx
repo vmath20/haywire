@@ -1,16 +1,29 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
+import { useConvexAuth } from "convex/react";
 import { EXAMPLES, parseGithubInput } from "@/lib/types";
+import { graphPath } from "@/lib/paths";
 import { WireCanvas } from "@/components/WireCanvas";
 
 export function HomeHero() {
   const router = useRouter();
+  const { isAuthenticated, isLoading } = useConvexAuth();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+
+  function goToRepo(owner: string, repo: string) {
+    const path = graphPath(owner, repo);
+    if (!isLoading && !isAuthenticated) {
+      router.push(`/signin?next=${encodeURIComponent(path)}`);
+      return;
+    }
+    router.push(path);
+  }
 
   function submit(raw: string) {
     const parsed = parseGithubInput(raw);
@@ -19,7 +32,7 @@ export function HomeHero() {
       return;
     }
     setError(null);
-    router.push(`/${parsed.owner}/${parsed.repo}`);
+    goToRepo(parsed.owner, parsed.repo);
   }
 
   function onSubmit(e: FormEvent) {
@@ -28,15 +41,11 @@ export function HomeHero() {
   }
 
   return (
-    <section className="relative isolate min-h-[calc(100vh-4rem)] overflow-hidden">
-      <div className="wire-grid absolute inset-0 opacity-70" aria-hidden />
-      <WireCanvas />
-
-      {/* Soft vignette so type stays readable over the graph */}
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(238,241,244,0.55)_0%,rgba(238,241,244,0.2)_45%,transparent_70%)]"
-        aria-hidden
-      />
+    <section className="relative isolate min-h-[calc(100vh-4rem)] overflow-hidden bg-white">
+      {/* Graph lives only in the hero (below the site header) */}
+      <div className="absolute inset-0" aria-hidden>
+        <WireCanvas />
+      </div>
 
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl flex-col justify-end px-4 pb-16 pt-10 sm:px-6 sm:pb-20 lg:justify-center lg:pb-24">
         <div className="max-w-4xl">
@@ -44,8 +53,16 @@ export function HomeHero() {
             Knowledge graphs from source
           </p>
 
-          <h1 className="animate-brand-in mt-4 font-display text-[clamp(3.5rem,14vw,9.5rem)] font-extrabold leading-[0.82] tracking-[-0.04em] text-wire-ink">
-            Haywire
+          <h1 className="animate-brand-in mt-4">
+            <Image
+              src="/logo.svg"
+              alt="Haywire"
+              width={900}
+              height={300}
+              priority
+              unoptimized
+              className="h-auto w-[min(100%,34rem)] sm:w-[min(100%,42rem)]"
+            />
           </h1>
 
           <p className="animate-fade-up mt-6 max-w-md text-lg leading-snug text-wire-mute sm:text-xl [animation-delay:180ms]">
@@ -57,7 +74,7 @@ export function HomeHero() {
             className="animate-fade-up mt-10 max-w-xl [animation-delay:280ms]"
           >
             <div
-              className={`flex flex-col gap-2 border-2 bg-wire-paper/90 p-2 backdrop-blur-sm transition sm:flex-row sm:items-stretch ${
+              className={`flex flex-col gap-2 border-2 bg-white/90 p-2 backdrop-blur-sm transition sm:flex-row sm:items-stretch ${
                 focused ? "border-wire-ink" : "border-wire-ink/20"
               }`}
             >
@@ -95,23 +112,13 @@ export function HomeHero() {
             <button
               key={`${ex.owner}/${ex.repo}`}
               type="button"
-              onClick={() => router.push(`/${ex.owner}/${ex.repo}`)}
+              onClick={() => goToRepo(ex.owner, ex.repo)}
               className="font-display text-lg font-bold tracking-tight text-wire-ink underline decoration-wire-signal decoration-2 underline-offset-4 transition hover:decoration-wire-ember"
             >
               {ex.label}
             </button>
           ))}
         </div>
-      </div>
-
-      <div
-        className="pointer-events-none absolute bottom-6 right-6 hidden items-center gap-2 sm:flex"
-        aria-hidden
-      >
-        <span className="h-2 w-2 animate-signal-pulse rounded-sm bg-wire-signal" />
-        <span className="font-mono text-[10px] uppercase tracking-[0.24em] text-wire-mute">
-          Live wire
-        </span>
       </div>
     </section>
   );

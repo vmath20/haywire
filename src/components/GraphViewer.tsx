@@ -41,7 +41,7 @@ function degreeMap(links: GraphLink[]): Map<string, number> {
   return d;
 }
 
-function buildVisData(nodes: GraphNode[], links: GraphLink[]) {
+function buildVisData(nodes: GraphNode[], links: GraphLink[], compact = false) {
   const degrees = degreeMap(links);
   const communityNames = new Map<number, string>();
   for (const n of nodes) {
@@ -57,10 +57,10 @@ function buildVisData(nodes: GraphNode[], links: GraphLink[]) {
     const deg = degrees.get(n.id) || 0;
     return {
       id: n.id,
-      label: n.label,
+      label: compact ? (deg > 12 ? n.label : "") : n.label,
       color: { background: color, border: "#1c1917" },
       size: Math.min(28, 8 + Math.sqrt(deg) * 3.2),
-      font: { color: "#1c1917", size: deg > 6 ? 13 : 11 },
+      font: { color: "#1c1917", size: compact ? 0 : deg > 6 ? 13 : 11 },
       title: `${n.label}\n${n.source_file || ""}${n.source_location ? " " + n.source_location : ""}\nCommunity ${c}`,
       _community: c,
       _community_name: communityNames.get(c) || `Community ${c}`,
@@ -72,7 +72,7 @@ function buildVisData(nodes: GraphNode[], links: GraphLink[]) {
 
   const visEdges = links.map((e, i) => {
     const conf = (e.confidence || "EXTRACTED").toUpperCase();
-    const dashes = conf !== "EXTRACTED";
+    const dashes = !compact && conf !== "EXTRACTED";
     const color =
       conf === "EXTRACTED" ? "#78716c" : conf === "INFERRED" ? "#0d9488" : "#d97706";
     return {
@@ -83,18 +83,24 @@ function buildVisData(nodes: GraphNode[], links: GraphLink[]) {
       dashes,
       width: conf === "EXTRACTED" ? 1.2 : 1.6,
       color: { color, highlight: "#0f766e", hover: "#0f766e" },
-      arrows: { to: { enabled: true, scaleFactor: 0.45 } },
+      ...(compact ? {} : { arrows: { to: { enabled: true, scaleFactor: 0.45 } } }),
       _confidence: conf,
       _relation: e.relation || "related",
     };
   });
+
+  const counts = new Map<number, number>();
+  for (const n of nodes) {
+    const c = n.community ?? 0;
+    counts.set(c, (counts.get(c) || 0) + 1);
+  }
 
   const legend = [...communityNames.entries()]
     .map(([id, name]) => ({
       id,
       name,
       color: COMMUNITY_COLORS[id % COMMUNITY_COLORS.length],
-      count: nodes.filter((n) => (n.community ?? 0) === id).length,
+      count: counts.get(id) || 0,
     }))
     .sort((a, b) => b.count - a.count);
 
@@ -114,10 +120,13 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
     "ALL",
   );
 
-  const prepared = useMemo(
-    () => buildVisData(result.graph.nodes || [], result.graph.links || []),
-    [result],
-  );
+  const prepared = useMemo(() => {
+    const nodes = result.graph.nodes || [];
+    return buildVisData(nodes, result.graph.links || [], nodes.length > 2000);
+  }, [result]);
+
+  const large = (result.graph.nodes?.length || 0) > 2000;
+  const huge = (result.graph.nodes?.length || 0) > 5000;
 
   useEffect(() => {
     setActiveCommunities(new Set(prepared.legend.map((l) => l.id)));
@@ -136,30 +145,53 @@ export function GraphViewer({ result, zoomEnabled }: Props) {
     edgesDSRef.current = edgesDS as DataSet<Record<string, unknown>>;
 
     const options: Options = {
-      physics: {
-        enabled: true,
-        solver: "forceAtlas2Based",
-        forceAtlas2Based: {
-          gravitationalConstant: -55,
-          centralGravity: 0.006,
-          springLength: 110,
-          springConstant: 0.08,
-          damping: 0.42,
-          avoidOverlap: 0.85,
-        },
-        stabilization: { iterations: 180, fit: true },
-      },
+      physics: large
+        ? {
+            enabled: true,
+            solver: "forceAtlas2Based",
+            forceAtlas2Based: {
+              gravitationalConstant: -35,
+              centralGravity: 0.01,
+              springLength: 90,
+              springConstant: 0.06,
+              damping: 0.55,
+              avoidOverlap: 0.3,
+            },
+            stabilization: { iterations: huge ? 40 : 80, fit: true, updateInterval: 25 },
+          }
+        : {
+            enabled: true,
+            solver: "forceAtlas2Based",
+            forceAtlas2Based: {
+              gravitationalConstant: -55,
+              centralGravity: 0.006,
+              springLength: 110,
+              springConstant: 0.08,
+              damping: 0.42,
+              avoidOverlap: 0.85,
+            },
+            stabilization: { iterations: 180, fit: true },
+          },
       interaction: {
         hover: true,
         tooltipDelay: 80,
         hideEdgesOnDrag: true,
+        hideEdgesOnZoom: large,
         zoomView: zoomEnabled,
         dragView: true,
       },
-      nodes: { shape: "dot", borderWidth: 1.4 },
+      nodes: {
+        shape: "dot",
+        borderWidth: 1.4,
+        // vis-network rejects `font: undefined` — omit the key instead.
+        ...(large ? { font: { size: 0 } } : {}),
+      },
       edges: {
-        smooth: { enabled: true, type: "continuous", roundness: 0.22 },
+        smooth: large
+          ? false
+          : { enabled: true, type: "continuous", roundness: 0.22 },
         selectionWidth: 3,
+        ...(large ? {} : { arrows: { to: { enabled: true, scaleFactor: 0.45 } } }),
       },
     };
 
