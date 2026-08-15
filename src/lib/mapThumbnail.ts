@@ -38,6 +38,19 @@ export function previewPalette(category: string, categories: { id: string }[]) {
   return MAP_PREVIEW_PALETTES[i % MAP_PREVIEW_PALETTES.length]!;
 }
 
+/** Compact layout from `maps.listMine` — never throws if fields are missing. */
+export function previewFromListRow(row: {
+  categoryIds?: string[] | null;
+  buildings?: MapPreviewModule[] | null;
+  flowSteps?: { from: string; to: string }[] | null;
+}): MapPreviewData {
+  return {
+    categories: (row.categoryIds ?? []).map((id) => ({ id })),
+    modules: row.buildings ?? [],
+    flows: [{ steps: row.flowSteps ?? [] }],
+  };
+}
+
 export function previewFromSpec(spec: SystemMapSpec): MapPreviewData {
   return {
     categories: spec.categories.map((c) => ({ id: c.id })),

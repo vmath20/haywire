@@ -31,6 +31,7 @@ import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { graphPath, queryChatPath } from "@/lib/paths";
 import { mapPath } from "@/lib/systemMap";
+import { previewFromListRow } from "@/lib/mapThumbnail";
 import { GraphCreateModal } from "@/components/GraphCreateModal";
 import { MapPreview } from "@/components/systemmap/MapPreview";
 import { DeletingState, LoadingState } from "@/components/LoadingState";
@@ -244,11 +245,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       owner: m.owner,
       repo: m.repo,
       label: m.label || m.repo,
-      preview: {
-        categories: m.categoryIds.map((id) => ({ id })),
-        modules: m.buildings,
-        flows: [{ steps: m.flowSteps }],
-      },
+      preview: previewFromListRow(m),
     }));
     if (
       activeMapOwner &&

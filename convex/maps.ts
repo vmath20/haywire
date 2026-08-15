@@ -65,24 +65,25 @@ function layoutFromSpec(specJson: string): {
       }[];
       flows?: { steps?: { from?: unknown; to?: unknown }[] }[];
     };
-    const categoryIds = (obj.categories ?? [])
-      .map((c) => String(c.id ?? "").trim())
+    const categoryIds = (Array.isArray(obj.categories) ? obj.categories : [])
+      .map((c) => String(c?.id ?? "").trim())
       .filter((id) => id.length > 0);
-    const buildings = (obj.modules ?? [])
+    const buildings = (Array.isArray(obj.modules) ? obj.modules : [])
+      .filter((m) => m != null)
       .map((m) => ({
         id: String(m.id ?? "").trim(),
         category: String(m.category ?? "system").trim() || "system",
         stack: Math.max(1, Math.min(6, Math.round(Number(m.stack) || 2))),
         size: Math.max(1, Math.min(2, Math.round(Number(m.size) || 1))),
-        x: Number(m.x) || 0,
-        y: Number(m.y) || 0,
+        x: Number.isFinite(Number(m.x)) ? Number(m.x) : 0,
+        y: Number.isFinite(Number(m.y)) ? Number(m.y) : 0,
       }))
       .filter((m) => m.id.length > 0);
-    const flowSteps = (obj.flows ?? []).flatMap((f) =>
-      (f.steps ?? [])
+    const flowSteps = (Array.isArray(obj.flows) ? obj.flows : []).flatMap((f) =>
+      (Array.isArray(f?.steps) ? f.steps : [])
         .map((s) => ({
-          from: String(s.from ?? "").trim(),
-          to: String(s.to ?? "").trim(),
+          from: String(s?.from ?? "").trim(),
+          to: String(s?.to ?? "").trim(),
         }))
         .filter((s) => s.from.length > 0 && s.to.length > 0),
     );

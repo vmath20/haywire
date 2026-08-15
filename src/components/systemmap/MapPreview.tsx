@@ -90,7 +90,7 @@ export function MapPreview({
       <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} fill="#f3f4f6" />
       {grid}
       {flows.flatMap((flow, fi) =>
-        flow.steps.map((step, si) => {
+        (flow.steps ?? []).map((step, si) => {
           const a = byId.get(step.from);
           const b = byId.get(step.to);
           if (!a || !b) return null;
