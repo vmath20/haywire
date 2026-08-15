@@ -31,16 +31,30 @@ const GEN_PHRASES = [
   "Writing the field notes…",
 ];
 
-function GeneratingScreen({ status, note }: { status: string; note?: string }) {
+function GeneratingScreen({
+  status,
+  note,
+  logs,
+}: {
+  status: string;
+  note?: string;
+  logs?: string[];
+}) {
   const [phrase, setPhrase] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setPhrase((p) => (p + 1) % GEN_PHRASES.length), 2600);
     return () => clearInterval(t);
   }, []);
+  const recent = (logs ?? []).slice(-6);
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-white">
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-white px-6">
       <LoadingState label={status} />
       <p className="text-xs text-wire-mute">{note || GEN_PHRASES[phrase]}</p>
+      {recent.length > 0 ? (
+        <pre className="max-h-40 w-full max-w-lg overflow-y-auto rounded-md border border-black/10 bg-[#fafafa] px-3 py-2 font-mono text-[10px] leading-relaxed text-wire-mute">
+          {recent.join("\n")}
+        </pre>
+      ) : null}
     </div>
   );
 }
@@ -93,6 +107,61 @@ async function readMapResponse(res: Response): Promise<{
   }
 }
 
+type MapStreamEvent =
+  | { type: "log"; message: string }
+  | { type: "status"; status: string; note?: string }
+  | { type: "building"; detail?: string }
+  | { type: "done"; spec: SystemMapSpec }
+  | { type: "error"; detail: string };
+
+async function consumeMapStream(
+  res: Response,
+  onEvent: (ev: MapStreamEvent) => void,
+): Promise<MapStreamEvent> {
+  const ctype = res.headers.get("content-type") || "";
+  if (!ctype.includes("event-stream") || !res.body) {
+    const data = await readMapResponse(res);
+    if (data.building) return { type: "building", detail: data.detail };
+    if (data.spec) return { type: "done", spec: data.spec };
+    return {
+      type: "error",
+      detail: data.detail || `Map generation failed (${res.status})`,
+    };
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let last: MapStreamEvent | null = null;
+
+  const handleLine = (line: string) => {
+    if (!line.startsWith("data: ")) return;
+    try {
+      const ev = JSON.parse(line.slice(6)) as MapStreamEvent;
+      last = ev;
+      onEvent(ev);
+    } catch (err) {
+      console.warn("[map] bad SSE line", line.slice(0, 200), err);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      for (const line of part.split("\n")) handleLine(line);
+    }
+  }
+  if (buf.trim()) {
+    for (const line of buf.split("\n")) handleLine(line);
+  }
+  if (last) return last;
+  throw new Error("Map stream ended without a result");
+}
+
 export function SystemMapView({ owner, repo }: { owner: string; repo: string }) {
   const { isAuthenticated } = useConvexAuth();
   const saved = useQuery(
@@ -110,6 +179,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState("Analyzing repository");
   const [genNote, setGenNote] = useState<string | undefined>(undefined);
+  const [genLogs, setGenLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
@@ -202,61 +272,86 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     setError(null);
     setGenStatus("Analyzing repository");
     setGenNote(undefined);
+    setGenLogs([]);
+    const logs: string[] = [];
+    const pushLog = (message: string) => {
+      const line = `${new Date().toISOString().slice(11, 19)} ${message}`;
+      logs.push(line);
+      console.info("[map]", message);
+      setGenLogs([...logs]);
+      setGenNote(message);
+    };
     try {
       const graphUrl = savedGraph?.graphUrl || example?.graphUrl || null;
-      // Retry loop: the backend may still be building the code graph.
+      pushLog(`Start ${owner}/${repo}${graphUrl ? " (saved graph)" : ""}`);
       for (let attempt = 0; attempt < 30; attempt++) {
         let res: Response;
         try {
+          pushLog(`POST /api/map attempt ${attempt + 1}`);
           res = await fetch("/api/map", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ owner, repo, graph_url: graphUrl }),
           });
+          pushLog(`HTTP ${res.status} ${res.headers.get("content-type") || ""}`);
         } catch (err) {
-          if (isDroppedConnection(err) && attempt < 12) {
+          const cause =
+            err instanceof Error && "cause" in err && err.cause instanceof Error
+              ? `${err.cause.name}: ${err.cause.message}`
+              : "";
+          const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+          pushLog(`Fetch threw ${msg}${cause ? ` (${cause})` : ""}`);
+          if (isDroppedConnection(err) && attempt < 2) {
             setGenStatus("Reconnecting");
-            setGenNote("The generator dropped the connection. Retrying…");
             await new Promise((r) => setTimeout(r, 4000));
             continue;
           }
           throw new Error(
-            "The connection dropped while generating the map. Large repositories can take a few minutes — click Retry.",
+            `Could not reach /api/map (${msg}). See the log below and the browser console ([map]).`,
           );
         }
-        if (res.status === 202) {
+
+        const ev = await consumeMapStream(res, (event) => {
+          if (event.type === "log") pushLog(event.message);
+          if (event.type === "status") {
+            setGenStatus(event.status);
+            if (event.note) setGenNote(event.note);
+          }
+        });
+
+        if (ev.type === "building") {
           setGenStatus("Building code graph");
-          setGenNote("This can take a few minutes for large repositories.");
+          pushLog(ev.detail || "Graph is still being built");
           await new Promise((r) => setTimeout(r, 12_000));
           continue;
         }
-        const data = await readMapResponse(res);
-        if (!res.ok || !data.spec) {
-          const detail = data.detail || `Map generation failed (${res.status})`;
-          if (/timed out|timeout/i.test(detail) && attempt < 12) {
-            setGenStatus("Retrying generator");
-            setGenNote(detail);
-            await new Promise((r) => setTimeout(r, 4000));
-            continue;
-          }
-          throw new Error(detail);
+        if (ev.type === "error") {
+          pushLog(`Error: ${ev.detail}`);
+          throw new Error(ev.detail);
         }
+        if (ev.type !== "done" || !ev.spec) {
+          throw new Error("Map generation returned no spec");
+        }
+
         setGenStatus("Saving map");
-        setGenNote(undefined);
+        pushLog(`Saving ${ev.spec.modules.length} modules, ${ev.spec.flows.length} flows`);
         await saveMap({
           owner,
           repo,
           label: repo,
-          spec: JSON.stringify(data.spec),
-          model: data.spec.model,
+          spec: JSON.stringify(ev.spec),
+          model: ev.spec.model,
         });
+        pushLog("Saved");
         return;
       }
       throw new Error(
         "The code graph is taking unusually long to build. Leave this page open and try again in a few minutes.",
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Map generation failed");
+      const message = err instanceof Error ? err.message : "Map generation failed";
+      pushLog(`Failed: ${message}`);
+      setError(`${message}\n\n${logs.slice(-12).join("\n")}`);
     } finally {
       setGenerating(false);
     }
@@ -289,7 +384,9 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
         <p className="font-mono text-[12px] uppercase tracking-[0.22em] text-wire-ember">
           Map generation failed
         </p>
-        <p className="max-w-md text-center text-sm leading-relaxed text-wire-mute">{error}</p>
+        <p className="max-w-lg whitespace-pre-wrap text-left text-sm leading-relaxed text-wire-mute">
+          {error}
+        </p>
         <button
           type="button"
           onClick={() => {
@@ -309,6 +406,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       <GeneratingScreen
         status={generating ? genStatus : "Loading map"}
         note={generating ? genNote : undefined}
+        logs={generating ? genLogs : undefined}
       />
     );
   }

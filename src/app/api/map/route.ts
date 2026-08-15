@@ -66,15 +66,32 @@ async function fetchJson<T>(
   init?: RequestInit,
   timeoutMs = 20_000,
 ): Promise<T | null> {
+  const started = Date.now();
+  const label = `${init?.method ?? "GET"} ${url.slice(0, 140)}`;
   try {
+    console.info(`[map] fetch start ${label}`);
     const res = await fetch(url, {
       cache: "no-store",
       signal: AbortSignal.timeout(timeoutMs),
       ...init,
     });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
+    const ms = Date.now() - started;
+    if (!res.ok) {
+      const snippet = await res.text().catch(() => "");
+      console.warn(
+        `[map] fetch ${res.status} ${ms}ms ${label}`,
+        snippet.slice(0, 180),
+      );
+      return null;
+    }
+    const data = (await res.json()) as T;
+    console.info(`[map] fetch ok ${ms}ms ${label}`);
+    return data;
+  } catch (err) {
+    console.warn(
+      `[map] fetch error ${Date.now() - started}ms ${label}`,
+      err instanceof Error ? `${err.name}: ${err.message}` : err,
+    );
     return null;
   }
 }
@@ -91,24 +108,39 @@ async function loadGraph(
   graphUrl?: string | null,
 ): Promise<AnalyzeResult | null | "building"> {
   if (graphUrl) {
+    console.info("[map] loadGraph via graph_url", graphUrl.slice(0, 120));
     const fromUrl = await fetchJson<AnalyzeResult>(graphUrl, undefined, 45_000);
-    if (fromUrl?.graph?.nodes?.length) return fromUrl;
+    if (fromUrl?.graph?.nodes?.length) {
+      console.info("[map] loadGraph hit graph_url", fromUrl.graph.nodes.length, "nodes");
+      return fromUrl;
+    }
+    console.warn("[map] loadGraph graph_url miss");
   }
 
   const base = backendBase(req);
+  console.info("[map] loadGraph backend", base);
   const cached = await fetchJson<AnalyzeResult>(`${base}/graph/${owner}/${repo}`, undefined, 45_000);
-  if (cached?.graph?.nodes?.length) return cached;
+  if (cached?.graph?.nodes?.length) {
+    console.info("[map] loadGraph cache hit", cached.graph.nodes.length, "nodes");
+    return cached;
+  }
 
+  console.info("[map] loadGraph starting analyze", `${owner}/${repo}`);
   const started = await fetchJson<{ job_id?: string }>(`${base}/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url: `${owner}/${repo}`, force: false, code_only: true }),
   });
-  if (!started?.job_id) return null;
+  if (!started?.job_id) {
+    console.warn("[map] loadGraph analyze did not return a job_id");
+    return null;
+  }
+  console.info("[map] loadGraph job", started.job_id);
 
   const job = await fetchJson<{ status?: string; error?: { message?: string } | null }>(
     `${base}/jobs/${started.job_id}`,
   );
+  console.info("[map] loadGraph job status", job?.status);
   if (job?.status === "error") {
     throw new Error(job.error?.message || `Graph build failed for ${owner}/${repo}`);
   }
@@ -127,6 +159,7 @@ async function loadGraph(
     if (fromCache?.graph?.nodes?.length) return fromCache;
   }
 
+  console.info("[map] loadGraph still building");
   return "building";
 }
 
@@ -290,104 +323,207 @@ function extractJson(text: string): unknown {
   return null;
 }
 
+export async function GET() {
+  console.info("[map] GET health");
+  return json({ ok: true, route: "map" });
+}
+
 export async function POST(req: NextRequest) {
+  const rid = Math.random().toString(36).slice(2, 8);
+  console.info(`[map ${rid}] POST begin`);
+
   let body: Body;
   try {
     body = (await req.json()) as Body;
   } catch {
+    console.warn(`[map ${rid}] invalid JSON body`);
     return json({ detail: "Invalid JSON" }, 400);
   }
 
   const owner = body.owner?.trim();
   const repo = body.repo?.trim();
-  if (!owner || !repo) return json({ detail: "owner and repo are required" }, 400);
-
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) return json({ detail: "OPENROUTER_API_KEY is not set" }, 500);
-
-  let graph: AnalyzeResult | null | "building";
-  try {
-    graph = await loadGraph(req, owner, repo, body.graph_url);
-  } catch (err) {
-    return json({ detail: err instanceof Error ? err.message : "Graph load failed" }, 502);
-  }
-  if (graph === "building") {
-    return json({ building: true, detail: "Graph is still being built" }, 202);
-  }
-  if (!graph) {
-    return json(
-      { detail: `Could not load or build a graph for ${owner}/${repo}. Check that the repository exists and is public.` },
-      404,
-    );
+  if (!owner || !repo) {
+    console.warn(`[map ${rid}] missing owner/repo`);
+    return json({ detail: "owner and repo are required" }, 400);
   }
 
-  const summary = summarizeGraph(graph);
-  const prompt = buildPrompt(owner, repo, summary);
-
-  const models = Array.from(new Set([DEFAULT_MODEL, "z-ai/glm-5v-turbo"]));
-  let lastError = "";
-
-  for (const model of models) {
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer":
-            process.env.NEXT_PUBLIC_SITE_URL || "https://haywire-omega.vercel.app",
-          "X-Title": "Haywire",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.4,
-          max_tokens: 6000,
-          response_format: { type: "json_object" },
-          reasoning: { exclude: true },
-        }),
-        signal: AbortSignal.timeout(90_000),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: { message?: string };
-        };
-        lastError = data.error?.message || `OpenRouter ${res.status}`;
-        continue;
-      }
-
-      const data = (await res.json()) as {
-        model?: string;
-        choices?: { message?: { content?: string } }[];
-        usage?: { total_tokens?: number };
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj: Record<string, unknown>) => {
+        console.info(
+          `[map ${rid}] event`,
+          obj.type,
+          obj.status ?? obj.detail ?? obj.message ?? "",
+        );
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       };
-      const content = data.choices?.[0]?.message?.content ?? "";
-      const raw = extractJson(content);
-      if (!raw) {
-        lastError = "Model returned unparseable JSON";
-        continue;
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+        } catch {
+          /* closed */
+        }
+      }, 4000);
+
+      try {
+        send({
+          type: "log",
+          message: `Request ${rid} for ${owner}/${repo}`,
+        });
+        send({
+          type: "status",
+          status: "Loading code graph",
+          note: body.graph_url ? "Using saved graph" : "Looking up graph cache",
+        });
+
+        const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+        if (!apiKey) {
+          send({ type: "error", detail: "OPENROUTER_API_KEY is not set" });
+          return;
+        }
+
+        let graph: AnalyzeResult | null | "building";
+        try {
+          graph = await loadGraph(req, owner, repo, body.graph_url);
+        } catch (err) {
+          send({
+            type: "error",
+            detail: err instanceof Error ? err.message : "Graph load failed",
+          });
+          return;
+        }
+
+        if (graph === "building") {
+          send({ type: "building", detail: "Graph is still being built" });
+          return;
+        }
+        if (!graph) {
+          send({
+            type: "error",
+            detail: `Could not load or build a graph for ${owner}/${repo}. Check that the repository exists and is public.`,
+          });
+          return;
+        }
+
+        send({
+          type: "log",
+          message: `Graph loaded: ${graph.graph.nodes.length} nodes, ${graph.graph.links.length} edges`,
+        });
+        send({
+          type: "status",
+          status: "Drafting system map",
+          note: "Asking the model to lay out modules and flows",
+        });
+
+        const summary = summarizeGraph(graph);
+        const prompt = buildPrompt(owner, repo, summary);
+        const models = Array.from(new Set([DEFAULT_MODEL, "z-ai/glm-5v-turbo"]));
+        send({
+          type: "log",
+          message: `Prompt ${prompt.length} chars; models ${models.join(" → ")}`,
+        });
+
+        let lastError = "";
+        for (const model of models) {
+          const t0 = Date.now();
+          send({ type: "log", message: `Calling ${model}` });
+          try {
+            const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer":
+                  process.env.NEXT_PUBLIC_SITE_URL || "https://haywire-omega.vercel.app",
+                "X-Title": "Haywire",
+              },
+              body: JSON.stringify({
+                model,
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.4,
+                max_tokens: 6000,
+                response_format: { type: "json_object" },
+                reasoning: { exclude: true },
+              }),
+              signal: AbortSignal.timeout(90_000),
+            });
+            const ms = Date.now() - t0;
+            if (!res.ok) {
+              const data = (await res.json().catch(() => ({}))) as {
+                error?: { message?: string };
+              };
+              lastError = data.error?.message || `OpenRouter ${res.status}`;
+              send({ type: "log", message: `${model} failed ${res.status} in ${ms}ms: ${lastError}` });
+              continue;
+            }
+
+            const data = (await res.json()) as {
+              model?: string;
+              choices?: { message?: { content?: string } }[];
+              usage?: { total_tokens?: number };
+            };
+            const content = data.choices?.[0]?.message?.content ?? "";
+            send({
+              type: "log",
+              message: `${model} ok in ${ms}ms, ${content.length} chars, ${data.usage?.total_tokens ?? 0} tokens`,
+            });
+            const raw = extractJson(content);
+            if (!raw) {
+              lastError = "Model returned unparseable JSON";
+              send({ type: "log", message: lastError });
+              continue;
+            }
+
+            const spec = normalizeSpec(raw, owner, repo, data.model || model, {
+              relayout: true,
+            });
+            if (spec.modules.length < 3) {
+              lastError = "Model returned too few modules";
+              send({ type: "log", message: `${lastError} (${spec.modules.length})` });
+              continue;
+            }
+
+            send({ type: "done", spec, total_tokens: data.usage?.total_tokens ?? 0 });
+            return;
+          } catch (err) {
+            const name = err instanceof Error ? err.name : "";
+            const msg = err instanceof Error ? err.message : "OpenRouter request failed";
+            lastError =
+              name === "TimeoutError" || /timeout|aborted/i.test(msg)
+                ? "Model timed out"
+                : msg;
+            send({ type: "log", message: `${model} threw: ${lastError}` });
+          }
+        }
+
+        send({ type: "error", detail: lastError || "Map generation failed" });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : "Map generation failed";
+        console.error(`[map ${rid}] crash`, err);
+        try {
+          send({ type: "error", detail });
+        } catch {
+          /* closed */
+        }
+      } finally {
+        clearInterval(heartbeat);
+        try {
+          controller.close();
+        } catch {
+          /* closed */
+        }
+        console.info(`[map ${rid}] stream closed`);
       }
+    },
+  });
 
-      const spec = normalizeSpec(raw, owner, repo, data.model || model, {
-        relayout: true,
-      });
-      if (spec.modules.length < 3) {
-        lastError = "Model returned too few modules";
-        continue;
-      }
-
-      return json({ spec, total_tokens: data.usage?.total_tokens ?? 0 });
-    } catch (err) {
-      const name = err instanceof Error ? err.name : "";
-      const msg = err instanceof Error ? err.message : "OpenRouter request failed";
-      lastError =
-        name === "TimeoutError" || /timeout|aborted/i.test(msg)
-          ? "Model timed out"
-          : msg;
-    }
-  }
-
-  const timedOut = /timed out|timeout/i.test(lastError);
-  return json({ detail: lastError || "Map generation failed" }, timedOut ? 504 : 502);
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
