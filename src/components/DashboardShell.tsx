@@ -32,6 +32,7 @@ import type { Id } from "@convex/_generated/dataModel";
 import { graphPath, queryChatPath } from "@/lib/paths";
 import { mapPath } from "@/lib/systemMap";
 import { GraphCreateModal } from "@/components/GraphCreateModal";
+import { MapPreview } from "@/components/systemmap/MapPreview";
 import { DeletingState, LoadingState } from "@/components/LoadingState";
 
 type CreateCtx = {
@@ -243,7 +244,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       owner: m.owner,
       repo: m.repo,
       label: m.label || m.repo,
-      thumbnailUrl: m.thumbnailUrl,
+      preview: m.preview,
     }));
     if (
       activeMapOwner &&
@@ -256,7 +257,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         owner: activeMapOwner,
         repo: activeMapRepo,
         label: activeMapRepo,
-        thumbnailUrl: null,
+        preview: null,
       });
     }
     return items.slice(0, 12);
@@ -620,16 +621,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                           )}
                           title={`${m.owner}/${m.repo}`}
                         >
-                          {m.thumbnailUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={m.thumbnailUrl}
-                              alt=""
-                              className="h-5 w-7 shrink-0 rounded-[3px] bg-[#f3f4f6] object-cover ring-1 ring-black/10"
+                          <span className="grid h-5 w-7 shrink-0 place-items-center overflow-hidden rounded-[3px] bg-[#f3f4f6] ring-1 ring-black/10">
+                            <MapPreview
+                              data={m.preview}
+                              compact
+                              className="h-full w-full"
                             />
-                          ) : (
-                            <Boxes className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                          )}
+                          </span>
                           <span className="truncate">{m.label}</span>
                         </Link>
                         {m.id ? (

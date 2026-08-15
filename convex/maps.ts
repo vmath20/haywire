@@ -25,6 +25,69 @@ export const generateUploadUrl = mutation({
   },
 });
 
+const mapPreviewValidator = v.union(
+  v.object({
+    categories: v.array(v.object({ id: v.string() })),
+    modules: v.array(
+      v.object({
+        id: v.string(),
+        category: v.string(),
+        stack: v.number(),
+        size: v.number(),
+        x: v.number(),
+        y: v.number(),
+      }),
+    ),
+    flows: v.array(
+      v.object({
+        steps: v.array(v.object({ from: v.string(), to: v.string() })),
+      }),
+    ),
+  }),
+  v.null(),
+);
+
+function previewFromSpecJson(specJson: string) {
+  try {
+    const raw = JSON.parse(specJson) as {
+      categories?: { id?: unknown }[];
+      modules?: {
+        id?: unknown;
+        category?: unknown;
+        stack?: unknown;
+        size?: unknown;
+        x?: unknown;
+        y?: unknown;
+      }[];
+      flows?: { steps?: { from?: unknown; to?: unknown }[] }[];
+    };
+    const categories = (raw.categories ?? [])
+      .map((c) => ({ id: typeof c.id === "string" ? c.id : "" }))
+      .filter((c) => c.id.length > 0);
+    const modules = (raw.modules ?? [])
+      .filter((m) => typeof m.id === "string" && m.id.length > 0)
+      .map((m) => ({
+        id: String(m.id),
+        category: typeof m.category === "string" ? m.category : "system",
+        stack: Math.max(1, Math.min(6, Math.round(Number(m.stack) || 2))),
+        size: Math.max(1, Math.min(2, Math.round(Number(m.size) || 1))),
+        x: Number(m.x) || 0,
+        y: Number(m.y) || 0,
+      }));
+    if (modules.length === 0) return null;
+    const flows = (raw.flows ?? [])
+      .map((f) => ({
+        steps: (f.steps ?? [])
+          .filter((s) => typeof s.from === "string" && typeof s.to === "string")
+          .map((s) => ({ from: String(s.from), to: String(s.to) })),
+      }))
+      .filter((f) => f.steps.length > 0);
+    return { categories, modules, flows };
+  } catch {
+    return null;
+  }
+}
+
 /** List the signed-in user's system maps, most recent first. */
 export const listMine = query({
   args: {},
@@ -37,7 +100,7 @@ export const listMine = query({
       label: v.string(),
       model: v.optional(v.string()),
       lastViewedAt: v.number(),
-      thumbnailUrl: v.union(v.string(), v.null()),
+      preview: mapPreviewValidator,
     }),
   ),
   handler: async (ctx) => {
@@ -48,20 +111,16 @@ export const listMine = query({
       .withIndex("by_user_lastViewed", (q) => q.eq("userId", userId))
       .order("desc")
       .take(50);
-    return await Promise.all(
-      rows.map(async (r) => ({
-        _id: r._id,
-        _creationTime: r._creationTime,
-        owner: r.owner,
-        repo: r.repo,
-        label: r.label,
-        model: r.model,
-        lastViewedAt: r.lastViewedAt,
-        thumbnailUrl: r.thumbnailStorageId
-          ? await ctx.storage.getUrl(r.thumbnailStorageId)
-          : null,
-      })),
-    );
+    return rows.map((r) => ({
+      _id: r._id,
+      _creationTime: r._creationTime,
+      owner: r.owner,
+      repo: r.repo,
+      label: r.label,
+      model: r.model,
+      lastViewedAt: r.lastViewedAt,
+      preview: previewFromSpecJson(r.spec),
+    }));
   },
 });
 

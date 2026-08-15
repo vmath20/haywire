@@ -1,6 +1,6 @@
 /**
- * Lightweight isometric preview of a SystemMapSpec, drawn to a JPEG data URL
- * for sidebar/home thumbnails. Mirrors IsoScene colors without vis or SVG.
+ * Isometric map preview: types + canvas JPEG for storage, SVG renderer for
+ * recents cards and the sidebar (drawn from the saved layout, not a stub).
  */
 
 import type { SystemMapSpec } from "@/lib/systemMap";
@@ -10,7 +10,22 @@ const HH = 11;
 const LH = 6;
 const SLAB_GAP = 1.4;
 
-const PALETTES = [
+export type MapPreviewModule = {
+  id: string;
+  category: string;
+  stack: number;
+  size: number;
+  x: number;
+  y: number;
+};
+
+export type MapPreviewData = {
+  categories: { id: string }[];
+  modules: MapPreviewModule[];
+  flows: { steps: { from: string; to: string }[] }[];
+};
+
+export const MAP_PREVIEW_PALETTES = [
   { top: "#f7ffe3", left: "#e7f3c2", right: "#d3e3a4" },
   { top: "#fbfcfd", left: "#eef1f5", right: "#e0e5eb" },
   { top: "#fff6ea", left: "#f3e6d4", right: "#e8d5bc" },
@@ -18,13 +33,30 @@ const PALETTES = [
   { top: "#f6f6f7", left: "#ececee", right: "#e2e2e5" },
 ] as const;
 
-function iso(gx: number, gy: number): { x: number; y: number } {
-  return { x: (gx - gy) * HW, y: (gx + gy) * HH };
+export function previewPalette(category: string, categories: { id: string }[]) {
+  const i = Math.max(0, categories.findIndex((c) => c.id === category));
+  return MAP_PREVIEW_PALETTES[i % MAP_PREVIEW_PALETTES.length]!;
 }
 
-function paletteAt(category: string, categories: { id: string }[]) {
-  const i = Math.max(0, categories.findIndex((c) => c.id === category));
-  return PALETTES[i % PALETTES.length]!;
+export function previewFromSpec(spec: SystemMapSpec): MapPreviewData {
+  return {
+    categories: spec.categories.map((c) => ({ id: c.id })),
+    modules: spec.modules.map((m) => ({
+      id: m.id,
+      category: m.category,
+      stack: m.stack,
+      size: m.size,
+      x: m.x,
+      y: m.y,
+    })),
+    flows: spec.flows.map((f) => ({
+      steps: f.steps.map((s) => ({ from: s.from, to: s.to })),
+    })),
+  };
+}
+
+function iso(gx: number, gy: number): { x: number; y: number } {
+  return { x: (gx - gy) * HW, y: (gx + gy) * HH };
 }
 
 export function renderMapThumbnail(
@@ -105,7 +137,7 @@ export function renderMapThumbnail(
 
   const sorted = [...modules].sort((a, b) => a.x + a.y - (b.x + b.y));
   for (const m of sorted) {
-    const pal = paletteAt(m.category, spec.categories);
+    const pal = previewPalette(m.category, spec.categories);
     const s = m.size;
     const stroke = "#8b95a1";
     for (let i = 0; i < m.stack; i++) {
