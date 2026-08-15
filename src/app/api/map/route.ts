@@ -33,10 +33,12 @@ type AnalyzeResult = {
 const DEFAULT_MODEL =
   process.env.OPENROUTER_MODEL?.trim() || "z-ai/glm-5v-turbo";
 const FALLBACK_MODEL = "moonshotai/kimi-k2.6";
+/** Per-model abort. Route maxDuration is 300s; keep the pair under that. */
 const MODEL_TIMEOUT_MS: Record<string, number> = {
-  "z-ai/glm-5v-turbo": 30_000,
-  "moonshotai/kimi-k2.6": 20_000,
+  "z-ai/glm-5v-turbo": 75_000,
+  "moonshotai/kimi-k2.6": 90_000,
 };
+const DEFAULT_MODEL_TIMEOUT_MS = 90_000;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -214,9 +216,15 @@ function summarizeGraph(result: AnalyzeResult): string {
     fileEdges.set(key, e);
   }
 
+  const large = nodes.length > 250 || files.size > 60;
+  const fileCap = large ? 22 : 36;
+  const symbolCap = large ? 4 : 6;
+  const edgeCap = large ? 36 : 70;
+  const charCap = large ? 8_000 : 12_000;
+
   const topFiles = [...files.entries()]
     .sort((a, b) => b[1].degree - a[1].degree)
-    .slice(0, 42);
+    .slice(0, fileCap);
 
   const lines: string[] = [];
   lines.push(
@@ -227,7 +235,7 @@ function summarizeGraph(result: AnalyzeResult): string {
   for (const [path, info] of topFiles) {
     const top = info.symbols
       .sort((a, b) => b.degree - a.degree)
-      .slice(0, 7)
+      .slice(0, symbolCap)
       .map((s) => s.label)
       .join(", ");
     lines.push(`- ${path} | ${info.nodes} symbols | degree ${info.degree} | ${top}`);
@@ -236,75 +244,58 @@ function summarizeGraph(result: AnalyzeResult): string {
   lines.push("", "FILE DEPENDENCIES (from -> to | edge count | relation):");
   const topEdges = [...fileEdges.entries()]
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 90);
+    .slice(0, edgeCap);
   for (const [key, e] of topEdges) {
     lines.push(`- ${key} | ${e.count} | ${e.relation}`);
   }
 
   let text = lines.join("\n");
-  if (text.length > 14_000) text = text.slice(0, 14_000);
+  if (text.length > charCap) text = text.slice(0, charCap);
   return text;
 }
 
 function buildPrompt(owner: string, repo: string, summary: string): string {
-  return `You are a systems cartographer. From the code-graph summary of the GitHub repository ${owner}/${repo}, design an isometric "system map": the repo's runtime architecture as buildings on a grid, with flows tracing real control/data paths.
+  return `You are a systems cartographer. From the code-graph summary of ${owner}/${repo}, design an isometric system map: runtime architecture as buildings on a grid, flows as real control/data paths.
 
 ${summary}
 
-Return ONLY a JSON object with this exact shape (no markdown fences, no commentary):
-
+Return ONLY JSON (no markdown) with this shape:
 {
-  "title": "Editorial title for the system, e.g. 'The Evolution Harness'",
+  "title": "Editorial title",
   "tagline": "One line: what a run of this system does",
-  "what": "2-4 sentences: what this repository IS and what happens when it runs. Plain language, no jargon dumps.",
-  "how": "2-4 sentences: how it is implemented — languages, key architectural choices, where the hard problems live.",
-  "categories": [
-    { "id": "entry", "label": "Entry and control" }
-  ],
-  "modules": [
-    {
-      "id": "CM",
-      "name": "CLI / MCP",
-      "category": "entry",
-      "what": "1-2 sentences, plain language: what this module does at runtime.",
-      "how": "1-2 sentences: how it's built (key files, patterns, libraries).",
-      "files": ["path/from/summary.py"],
-      "stack": 3,
-      "size": 1,
-      "x": 2,
-      "y": 1
-    }
-  ],
-  "flows": [
-    {
-      "id": "generation-loop",
-      "name": "Generation loop",
-      "tagline": "Candidate → evaluation → durable knowledge → next generation",
-      "what": "2-3 sentences explaining what moves through this flow and why.",
-      "payload": "GenerationContext",
-      "sources": ["cli_solve.py", "mcp/server.py"],
-      "steps": [
-        { "from": "CM", "to": "RL", "kind": "flow" },
-        { "from": "RL", "to": "KN", "kind": "flow" }
-      ]
-    }
-  ],
-  "stats": [
-    { "label": "Runtime flows", "value": "4" },
-    { "label": "Active modules", "value": "9" }
-  ]
+  "what": "2-3 sentences: what this repo is and what happens when it runs",
+  "how": "2-3 sentences: languages, architecture, where the hard problems live",
+  "categories": [{ "id": "entry", "label": "Entry and control" }],
+  "modules": [{
+    "id": "CM", "name": "CLI", "category": "entry",
+    "what": "What this module does at runtime",
+    "how": "How it's built (key files, patterns)",
+    "files": ["path/from/summary.py"],
+    "stack": 3, "size": 1, "x": 2, "y": 1
+  }],
+  "flows": [{
+    "id": "main", "name": "Main path",
+    "tagline": "A → B → C",
+    "what": "What moves through this flow",
+    "payload": "A real type or artifact name",
+    "sources": ["file.py"],
+    "steps": [
+      { "from": "CM", "to": "RL", "kind": "flow" }
+    ]
+  }],
+  "stats": [{ "label": "Active modules", "value": "9" }]
 }
 
 Rules:
-- 8 to 14 modules. Each is a REAL subsystem inferred from the files (group related files). Module ids are 1-3 uppercase letters, all unique. Never exceed 14 — if the repo is huge, cluster into the most important subsystems rather than listing everything.
-- 3 or 4 categories that tell a story, e.g. "The system", "The evolution loop", "What comes out" — adapt to THIS repo.
-- Every module's "files" must cite real paths from the summary. Never invent paths.
-- "stack" (1-6) = how much machinery lives inside (more symbols/connectivity = taller). "size" (1-2) = architectural importance.
-- Positions: grid is ${MAP_GRID_W} wide (x) by ${MAP_GRID_H} deep (y). The renderer will re-lay modules along the primary flow as an avenue (entry left → output right), so x/y are hints only. Still avoid stacking two modules on the same cell.
-- 2 to 4 flows tracing REAL paths along file dependencies (steps must follow plausible edges from the summary). kind is "flow" for the main path, "retry" for retry/fallback hops, "feedback" for loops back.
-- "payload" names the actual data structure or artifact moving through the flow, using a real name from the summary when one exists.
-- 4 stats, specific to this repo (module counts, flow counts, distinct file types, etc.). Keep values short.
-- All prose must be concrete and grounded in the summary. Never say "the graph" or "the summary" — describe the system itself.`;
+- 8–12 modules. Real subsystems grouped from the files. Ids: 1–3 unique uppercase letters. Huge repos: cluster; never exceed 12.
+- 3 or 4 categories that fit THIS repo.
+- Every module "files" entry must be a real path from the summary.
+- stack 1–6 (more machinery = taller). size 1–2 (importance).
+- Grid is ${MAP_GRID_W}×${MAP_GRID_H}. x/y are hints; do not stack two modules on one cell.
+- 2–4 flows along plausible file dependencies. kind: "flow" | "retry" | "feedback".
+- payload is a real data/artifact name from the summary when one exists.
+- 4 short stats specific to this repo.
+- Concrete prose about the system. Never mention "the graph" or "the summary".`;
 }
 
 function extractJson(text: string): unknown {
@@ -432,10 +423,17 @@ export async function POST(req: NextRequest) {
         });
 
         let lastError = "";
-        for (const model of models) {
+        for (const [index, model] of models.entries()) {
           const t0 = Date.now();
-          const timeoutMs = MODEL_TIMEOUT_MS[model] ?? 25_000;
-          send({ type: "log", message: `Calling ${model}` });
+          const timeoutMs = MODEL_TIMEOUT_MS[model] ?? DEFAULT_MODEL_TIMEOUT_MS;
+          if (index > 0) {
+            send({
+              type: "status",
+              status: "Trying a second model",
+              note: lastError || "First model did not finish in time",
+            });
+          }
+          send({ type: "log", message: `Calling ${model} (${Math.round(timeoutMs / 1000)}s budget)` });
           try {
             const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
               method: "POST",
@@ -450,7 +448,7 @@ export async function POST(req: NextRequest) {
                 model,
                 messages: [{ role: "user", content: prompt }],
                 temperature: 0.4,
-                max_tokens: 6000,
+                max_tokens: 4000,
                 response_format: { type: "json_object" },
                 reasoning: { exclude: true },
                 usage: { include: true },
