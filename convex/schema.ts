@@ -41,6 +41,20 @@ export default defineSchema({
     builtAt: v.number(),
   }).index("by_owner_repo", ["owner", "repo"]),
 
+  /** Per-user isometric system maps generated from repo graphs. */
+  systemMaps: defineTable({
+    userId: v.id("users"),
+    owner: v.string(),
+    repo: v.string(),
+    label: v.string(),
+    /** SystemMapSpec JSON string. */
+    spec: v.string(),
+    model: v.optional(v.string()),
+    lastViewedAt: v.number(),
+  })
+    .index("by_user_lastViewed", ["userId", "lastViewedAt"])
+    .index("by_user_owner_repo", ["userId", "owner", "repo"]),
+
   /** Per-user query chat sessions (graph Q&A). */
   queryChats: defineTable({
     userId: v.id("users"),

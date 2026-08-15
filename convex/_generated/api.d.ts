@@ -13,6 +13,7 @@ import type * as chats from "../chats.js";
 import type * as examples from "../examples.js";
 import type * as graphs from "../graphs.js";
 import type * as http from "../http.js";
+import type * as maps from "../maps.js";
 import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 
@@ -28,6 +29,7 @@ declare const fullApi: ApiFromModules<{
   examples: typeof examples;
   graphs: typeof graphs;
   http: typeof http;
+  maps: typeof maps;
   usage: typeof usage;
   users: typeof users;
 }>;

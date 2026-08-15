@@ -14,6 +14,7 @@ import {
 import clsx from "clsx";
 import {
   BookOpen,
+  Boxes,
   FolderKanban,
   GitBranch,
   Library,
@@ -178,6 +179,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const activeRepo = graphMatch ? decodeURIComponent(graphMatch[2]) : null;
   const onGraphPage = Boolean(activeOwner && activeRepo);
   const onGraphsHome = currentPath === "/dashboard";
+  const onMap = currentPath.startsWith("/dashboard/map");
   const onUsage = currentPath.startsWith("/dashboard/usage");
   const onGuidance = currentPath.startsWith("/dashboard/guidance");
   const chatMatch = currentPath.match(/^\/dashboard\/query\/([^/]+)/);
@@ -522,6 +524,16 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 </ul>
               </div>
             </div>
+
+            <Link
+              href="/dashboard/map"
+              title="Map"
+              onClick={() => setPendingPath("/dashboard/map")}
+              className={navItemClass(onMap)}
+            >
+              <Boxes className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+              <span className={navLabelClass}>Map</span>
+            </Link>
 
             <Link
               href="/dashboard/usage"
