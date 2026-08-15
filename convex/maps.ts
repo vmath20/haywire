@@ -24,74 +24,6 @@ export const generateUploadUrl = mutation({
   },
 });
 
-const mapPreviewValidator = v.union(
-  v.object({
-    categories: v.array(v.object({ id: v.string() })),
-    modules: v.array(
-      v.object({
-        id: v.string(),
-        category: v.string(),
-        stack: v.number(),
-        size: v.number(),
-        x: v.number(),
-        y: v.number(),
-      }),
-    ),
-    flows: v.array(
-      v.object({
-        steps: v.array(v.object({ from: v.string(), to: v.string() })),
-      }),
-    ),
-  }),
-  v.null(),
-);
-
-function previewFromSpecJson(specJson: string) {
-  try {
-    let raw: unknown = JSON.parse(specJson);
-    if (typeof raw === "string") raw = JSON.parse(raw);
-    const obj = (raw ?? {}) as {
-      categories?: { id?: unknown }[];
-      modules?: {
-        id?: unknown;
-        category?: unknown;
-        stack?: unknown;
-        size?: unknown;
-        x?: unknown;
-        y?: unknown;
-      }[];
-      flows?: { steps?: { from?: unknown; to?: unknown }[] }[];
-    };
-    const categories = (obj.categories ?? [])
-      .map((c) => ({ id: String(c.id ?? "").trim() }))
-      .filter((c) => c.id.length > 0);
-    const modules = (obj.modules ?? [])
-      .map((m) => ({
-        id: String(m.id ?? "").trim(),
-        category: String(m.category ?? "system").trim() || "system",
-        stack: Math.max(1, Math.min(6, Math.round(Number(m.stack) || 2))),
-        size: Math.max(1, Math.min(2, Math.round(Number(m.size) || 1))),
-        x: Number(m.x) || 0,
-        y: Number(m.y) || 0,
-      }))
-      .filter((m) => m.id.length > 0);
-    if (modules.length === 0) return null;
-    const flows = (obj.flows ?? [])
-      .map((f) => ({
-        steps: (f.steps ?? [])
-          .map((s) => ({
-            from: String(s.from ?? "").trim(),
-            to: String(s.to ?? "").trim(),
-          }))
-          .filter((s) => s.from.length > 0 && s.to.length > 0),
-      }))
-      .filter((f) => f.steps.length > 0);
-    return { categories, modules, flows };
-  } catch {
-    return null;
-  }
-}
-
 /** List the signed-in user's system maps, most recent first. */
 export const listMine = query({
   args: {},
@@ -104,7 +36,7 @@ export const listMine = query({
       label: v.string(),
       model: v.optional(v.string()),
       lastViewedAt: v.number(),
-      preview: mapPreviewValidator,
+      spec: v.string(),
     }),
   ),
   handler: async (ctx) => {
@@ -123,7 +55,7 @@ export const listMine = query({
       label: r.label,
       model: r.model,
       lastViewedAt: r.lastViewedAt,
-      preview: previewFromSpecJson(r.spec),
+      spec: r.spec,
     }));
   },
 });
