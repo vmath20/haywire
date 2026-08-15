@@ -30,6 +30,7 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
 import { graphPath, queryChatPath } from "@/lib/paths";
+import { mapPath } from "@/lib/systemMap";
 import { GraphCreateModal } from "@/components/GraphCreateModal";
 import { DeletingState, LoadingState } from "@/components/LoadingState";
 
@@ -101,18 +102,22 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const viewer = useQuery(api.users.viewer, isAuthenticated ? {} : "skip");
   const saved = useQuery(api.graphs.listMine, isAuthenticated ? {} : "skip") ?? [];
   const chats = useQuery(api.chats.listMine, isAuthenticated ? {} : "skip") ?? [];
+  const maps = useQuery(api.maps.listMine, isAuthenticated ? {} : "skip") ?? [];
   const [modalOpen, setModalOpen] = useState(false);
   const [graphsOpen, setGraphsOpen] = useState(true);
   const [queryOpen, setQueryOpen] = useState(true);
+  const [mapsOpen, setMapsOpen] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   // Optimistic navigation target: highlights the clicked item immediately,
   // even while the destination route is still loading.
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const removeGraph = useMutation(api.graphs.remove);
   const removeChat = useMutation(api.chats.remove);
+  const removeMap = useMutation(api.maps.remove);
   const [pendingDelete, setPendingDelete] = useState<
     | { type: "graph"; id: Id<"savedGraphs">; label: string; owner: string; repo: string }
     | { type: "chat"; id: Id<"queryChats">; label: string }
+    | { type: "map"; id: Id<"systemMaps">; label: string; owner: string; repo: string }
     | null
   >(null);
   const [deleting, setDeleting] = useState(false);
@@ -179,7 +184,12 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const activeRepo = graphMatch ? decodeURIComponent(graphMatch[2]) : null;
   const onGraphPage = Boolean(activeOwner && activeRepo);
   const onGraphsHome = currentPath === "/dashboard";
-  const onMap = currentPath.startsWith("/dashboard/map");
+  const mapMatch = currentPath.match(/^\/dashboard\/map\/([^/]+)\/([^/]+)/);
+  const activeMapOwner = mapMatch ? decodeURIComponent(mapMatch[1]) : null;
+  const activeMapRepo = mapMatch ? decodeURIComponent(mapMatch[2]) : null;
+  const onMapPage = Boolean(activeMapOwner && activeMapRepo);
+  const onMapHome = currentPath === "/dashboard/map";
+  const onMap = onMapHome || onMapPage;
   const onUsage = currentPath.startsWith("/dashboard/usage");
   const onGuidance = currentPath.startsWith("/dashboard/guidance");
   const chatMatch = currentPath.match(/^\/dashboard\/query\/([^/]+)/);
@@ -198,6 +208,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (onQueryChat) setQueryOpen(true);
   }, [onQueryChat]);
+  useEffect(() => {
+    if (onMapPage) setMapsOpen(true);
+  }, [onMapPage]);
 
   const sidebarGraphs = useMemo(() => {
     const items = saved.map((g) => ({
@@ -223,6 +236,32 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     return items.slice(0, 12);
   }, [saved, activeOwner, activeRepo]);
 
+  const sidebarMaps = useMemo(() => {
+    const items = maps.map((m) => ({
+      key: `${m.owner}/${m.repo}`,
+      id: m._id as Id<"systemMaps"> | null,
+      owner: m.owner,
+      repo: m.repo,
+      label: m.label || m.repo,
+      thumbnailUrl: m.thumbnailUrl,
+    }));
+    if (
+      activeMapOwner &&
+      activeMapRepo &&
+      !items.some((m) => m.owner === activeMapOwner && m.repo === activeMapRepo)
+    ) {
+      items.unshift({
+        key: `${activeMapOwner}/${activeMapRepo}`,
+        id: null,
+        owner: activeMapOwner,
+        repo: activeMapRepo,
+        label: activeMapRepo,
+        thumbnailUrl: null,
+      });
+    }
+    return items.slice(0, 12);
+  }, [maps, activeMapOwner, activeMapRepo]);
+
   async function confirmDelete() {
     if (!pendingDelete || deleting) return;
     setDeleting(true);
@@ -232,10 +271,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         if (activeOwner === pendingDelete.owner && activeRepo === pendingDelete.repo) {
           navigate("/dashboard");
         }
-      } else {
+      } else if (pendingDelete.type === "chat") {
         await removeChat({ chatId: pendingDelete.id });
         if (activeChatId === pendingDelete.id) {
           navigate("/dashboard/query");
+        }
+      } else {
+        await removeMap({ id: pendingDelete.id });
+        if (activeMapOwner === pendingDelete.owner && activeMapRepo === pendingDelete.repo) {
+          navigate("/dashboard/map");
         }
       }
       setPendingDelete(null);
@@ -273,6 +317,21 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
     setQueryOpen((o) => !o);
     if (!onQueryPage) navigate("/dashboard/query");
+  }
+
+  function handleMapClick(e: React.MouseEvent) {
+    if (collapsed || sidebarMaps.length === 0) {
+      navigate("/dashboard/map");
+      return;
+    }
+    e.preventDefault();
+    if (!onMapHome && !onMapPage) {
+      setMapsOpen(true);
+      navigate("/dashboard/map");
+      return;
+    }
+    setMapsOpen((o) => !o);
+    if (!onMapHome) navigate("/dashboard/map");
   }
 
   const sidebarChats = chats.slice(0, 12);
@@ -525,15 +584,79 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            <Link
-              href="/dashboard/map"
+            <button
+              type="button"
               title="Map"
-              onClick={() => setPendingPath("/dashboard/map")}
-              className={navItemClass(onMap)}
+              onClick={handleMapClick}
+              className={clsx(navItemClass(onMap), "w-full text-left")}
             >
               <Boxes className="h-4 w-4 shrink-0" strokeWidth={1.75} />
               <span className={navLabelClass}>Map</span>
-            </Link>
+            </button>
+
+            <div
+              className={clsx(
+                "grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                !collapsed && mapsOpen && sidebarMaps.length > 0
+                  ? "grid-rows-[1fr] opacity-100"
+                  : "grid-rows-[0fr] opacity-0",
+              )}
+            >
+              <div className="overflow-hidden">
+                <ul className="mb-2 ml-2 space-y-0.5 border-l border-black/8 pl-2">
+                  {sidebarMaps.map((m) => {
+                    const active = m.owner === activeMapOwner && m.repo === activeMapRepo;
+                    const href = mapPath(m.owner, m.repo);
+                    return (
+                      <li key={m.key} className="group/item relative">
+                        <Link
+                          href={href}
+                          onClick={() => setPendingPath(href)}
+                          className={clsx(
+                            "flex items-center gap-2 truncate rounded-md px-2 py-1.5 pr-7 text-sm transition-colors",
+                            active
+                              ? "bg-[#f4f4f5] font-semibold text-wire-ink"
+                              : "text-wire-mute hover:bg-black/[0.04] hover:text-wire-ink",
+                          )}
+                          title={`${m.owner}/${m.repo}`}
+                        >
+                          {m.thumbnailUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={m.thumbnailUrl}
+                              alt=""
+                              className="h-5 w-7 shrink-0 rounded-[3px] bg-[#f3f4f6] object-cover ring-1 ring-black/10"
+                            />
+                          ) : (
+                            <Boxes className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                          )}
+                          <span className="truncate">{m.label}</span>
+                        </Link>
+                        {m.id ? (
+                          <button
+                            type="button"
+                            aria-label={`Delete ${m.label}`}
+                            title="Delete map"
+                            onClick={() =>
+                              setPendingDelete({
+                                type: "map",
+                                id: m.id!,
+                                label: m.label,
+                                owner: m.owner,
+                                repo: m.repo,
+                              })
+                            }
+                            className="absolute right-1 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-wire-mute opacity-0 transition hover:bg-black/[0.06] hover:text-wire-ember focus-visible:opacity-100 group-hover/item:opacity-100"
+                          >
+                            <Trash2 className="h-3 w-3" strokeWidth={1.75} />
+                          </button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </div>
 
             <Link
               href="/dashboard/usage"
@@ -607,7 +730,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             className="relative z-10 w-full max-w-sm rounded-2xl border border-black/10 bg-white p-5 shadow-[0_24px_80px_rgba(0,0,0,0.18)]"
           >
             <h2 className="font-display text-lg font-bold tracking-tight text-wire-ink">
-              Delete {pendingDelete.type === "graph" ? "graph" : "chat"}?
+              Delete {pendingDelete.type === "graph" ? "graph" : pendingDelete.type === "chat" ? "chat" : "map"}?
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-wire-mute">
               <span className="font-medium text-wire-ink">“{pendingDelete.label}”</span>{" "}

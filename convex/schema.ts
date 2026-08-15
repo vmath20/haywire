@@ -50,6 +50,7 @@ export default defineSchema({
     /** SystemMapSpec JSON string. */
     spec: v.string(),
     model: v.optional(v.string()),
+    thumbnailStorageId: v.optional(v.id("_storage")),
     lastViewedAt: v.number(),
   })
     .index("by_user_lastViewed", ["userId", "lastViewedAt"])

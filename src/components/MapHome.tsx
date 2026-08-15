@@ -45,6 +45,7 @@ export function MapHome() {
         repo: m.repo,
         label: m.label || m.repo,
         href: mapPath(m.owner, m.repo),
+        thumbnailUrl: m.thumbnailUrl,
       })),
     [maps],
   );
@@ -116,7 +117,7 @@ export function MapHome() {
         </form>
 
         <h2 className="mt-12 font-display text-lg font-bold tracking-tight text-wire-ink">
-          Your maps
+          Recent maps
         </h2>
 
         {cards.length === 0 ? (
@@ -134,42 +135,50 @@ export function MapHome() {
                   href={c.href}
                   className="group block overflow-hidden border-2 border-wire-ink/20 bg-white transition hover:border-wire-ink"
                 >
-                  <div className="flex h-28 items-center justify-center bg-[#f3f4f6]">
-                    {/* mini isometric mark */}
-                    <svg viewBox="-40 -30 80 60" className="h-16 w-24">
-                      {[
-                        { x: -14, y: 0, h: 14 },
-                        { x: 4, y: -8, h: 22 },
-                        { x: 14, y: 6, h: 10 },
-                      ].map((b, i) => (
-                        <g key={i}>
-                          <path
-                            d={`M ${b.x} ${b.y - b.h} l 10 5 v ${b.h * 0.8} l -10 -5 Z`}
-                            fill="#e0e5eb"
-                            stroke="#98a2af"
-                            strokeWidth={0.7}
-                          />
-                          <path
-                            d={`M ${b.x} ${b.y - b.h} l -10 5 v ${b.h * 0.8} l 10 -5 Z`}
-                            fill="#edf0f4"
-                            stroke="#98a2af"
-                            strokeWidth={0.7}
-                          />
-                          <path
-                            d={`M ${b.x} ${b.y - b.h} l 10 5 l -10 5 l -10 -5 Z`}
-                            fill="#ffffff"
-                            stroke="#98a2af"
-                            strokeWidth={0.7}
-                          />
-                        </g>
-                      ))}
-                      <path
-                        d="M -24 14 L 24 14"
-                        stroke="#8fd414"
-                        strokeWidth={1}
-                        opacity={0.8}
+                  <div className="relative flex h-28 items-center justify-center overflow-hidden bg-[#f3f4f6]">
+                    {c.thumbnailUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={c.thumbnailUrl}
+                        alt=""
+                        className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                       />
-                    </svg>
+                    ) : (
+                      <svg viewBox="-40 -30 80 60" className="h-16 w-24">
+                        {[
+                          { x: -14, y: 0, h: 14 },
+                          { x: 4, y: -8, h: 22 },
+                          { x: 14, y: 6, h: 10 },
+                        ].map((b, i) => (
+                          <g key={i}>
+                            <path
+                              d={`M ${b.x} ${b.y - b.h} l 10 5 v ${b.h * 0.8} l -10 -5 Z`}
+                              fill="#e0e5eb"
+                              stroke="#98a2af"
+                              strokeWidth={0.7}
+                            />
+                            <path
+                              d={`M ${b.x} ${b.y - b.h} l -10 5 v ${b.h * 0.8} l 10 -5 Z`}
+                              fill="#edf0f4"
+                              stroke="#98a2af"
+                              strokeWidth={0.7}
+                            />
+                            <path
+                              d={`M ${b.x} ${b.y - b.h} l 10 5 l -10 5 l -10 -5 Z`}
+                              fill="#ffffff"
+                              stroke="#98a2af"
+                              strokeWidth={0.7}
+                            />
+                          </g>
+                        ))}
+                        <path
+                          d="M -24 14 L 24 14"
+                          stroke="#8fd414"
+                          strokeWidth={1}
+                          opacity={0.8}
+                        />
+                      </svg>
+                    )}
                   </div>
                   <div className="px-4 py-3">
                     <p className="truncate text-sm font-semibold text-wire-ink">{c.label}</p>

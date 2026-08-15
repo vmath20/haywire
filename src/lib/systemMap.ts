@@ -62,6 +62,7 @@ export type SystemMapSpec = {
 
 export const MAP_GRID_W = 16;
 export const MAP_GRID_H = 12;
+export const MAX_MODULES = 16;
 export const LAYOUT_VERSION = 2;
 
 function clampInt(n: unknown, lo: number, hi: number, fallback: number): number {
@@ -261,10 +262,28 @@ export function layoutByFlow(modules: MapModule[], flows: MapFlow[]): MapModule[
     if (!pos.has(m.id)) place(m.id, anchor.x + 3, anchor.y);
   }
 
-  return modules.map((m) => {
-    const p = pos.get(m.id);
-    return p ? { ...m, x: p.x, y: p.y } : m;
-  });
+  // Last pass: shrink leftovers to 1×1 and pack into remaining cells.
+  // Anything that still does not fit is dropped so the city never overflows
+  // the 16×12 grid.
+  for (const m of modules) {
+    if (pos.has(m.id)) continue;
+    if (m.size > 1) {
+      byId.set(m.id, { ...m, size: 1 });
+      const spot = spiralFrom(1, 1, 1);
+      if (spot) {
+        pos.set(m.id, spot);
+        claim(spot.x, spot.y, 1);
+      }
+    }
+  }
+
+  return modules
+    .filter((m) => pos.has(m.id))
+    .map((m) => {
+      const p = pos.get(m.id)!;
+      const sized = byId.get(m.id) ?? m;
+      return { ...m, x: p.x, y: p.y, size: sized.size };
+    });
 }
 
 export type NormalizeOptions = {
@@ -373,7 +392,7 @@ export function normalizeSpec(
       x: spot.x,
       y: spot.y,
     });
-    if (modules.length >= 16) break;
+    if (modules.length >= MAX_MODULES) break;
   }
 
   const moduleIds = new Set(modules.map((m) => m.id));
@@ -428,6 +447,13 @@ export function normalizeSpec(
   }
 
   const laidOut = relayout ? layoutByFlow(modules, flows) : modules;
+  const keptIds = new Set(laidOut.map((m) => m.id));
+  const prunedFlows = flows
+    .map((f) => ({
+      ...f,
+      steps: f.steps.filter((s) => keptIds.has(s.from) && keptIds.has(s.to)),
+    }))
+    .filter((f) => f.steps.length > 0);
 
   return {
     owner,
@@ -438,7 +464,7 @@ export function normalizeSpec(
     how: asString(r.how, ""),
     categories,
     modules: laidOut,
-    flows,
+    flows: prunedFlows,
     stats,
     generatedAt: typeof r.generatedAt === "number" ? r.generatedAt : Date.now(),
     model,

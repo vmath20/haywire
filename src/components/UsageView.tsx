@@ -454,12 +454,6 @@ export function UsageView() {
               <dd className="mt-0.5 font-semibold tabular-nums">{graph.builds.toLocaleString()}</dd>
             </div>
             <div className="rounded-xl bg-[#fafafa] px-3 py-2.5">
-              <dt className="text-[11px] text-wire-mute">Fresh / cached</dt>
-              <dd className="mt-0.5 font-semibold tabular-nums">
-                {graph.fresh} / {graph.cached}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-[#fafafa] px-3 py-2.5">
               <dt className="text-[11px] text-wire-mute">Nodes processed</dt>
               <dd className="mt-0.5 font-semibold tabular-nums">
                 {formatTokens(graph.nodesProcessed)}

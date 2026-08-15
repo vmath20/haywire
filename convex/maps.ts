@@ -1,6 +1,29 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import type { Id } from "./_generated/dataModel";
+
+async function deleteStorage(
+  ctx: { storage: { delete: (id: Id<"_storage">) => Promise<void> } },
+  id: Id<"_storage"> | undefined,
+) {
+  if (!id) return;
+  try {
+    await ctx.storage.delete(id);
+  } catch {
+    // ignore missing blobs
+  }
+}
+
+export const generateUploadUrl = mutation({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Not authenticated");
+    return await ctx.storage.generateUploadUrl();
+  },
+});
 
 /** List the signed-in user's system maps, most recent first. */
 export const listMine = query({
@@ -14,6 +37,7 @@ export const listMine = query({
       label: v.string(),
       model: v.optional(v.string()),
       lastViewedAt: v.number(),
+      thumbnailUrl: v.union(v.string(), v.null()),
     }),
   ),
   handler: async (ctx) => {
@@ -24,15 +48,20 @@ export const listMine = query({
       .withIndex("by_user_lastViewed", (q) => q.eq("userId", userId))
       .order("desc")
       .take(50);
-    return rows.map((r) => ({
-      _id: r._id,
-      _creationTime: r._creationTime,
-      owner: r.owner,
-      repo: r.repo,
-      label: r.label,
-      model: r.model,
-      lastViewedAt: r.lastViewedAt,
-    }));
+    return await Promise.all(
+      rows.map(async (r) => ({
+        _id: r._id,
+        _creationTime: r._creationTime,
+        owner: r.owner,
+        repo: r.repo,
+        label: r.label,
+        model: r.model,
+        lastViewedAt: r.lastViewedAt,
+        thumbnailUrl: r.thumbnailStorageId
+          ? await ctx.storage.getUrl(r.thumbnailStorageId)
+          : null,
+      })),
+    );
   },
 });
 
@@ -48,6 +77,7 @@ export const getByRepo = query({
       spec: v.string(),
       model: v.optional(v.string()),
       lastViewedAt: v.number(),
+      hasThumbnail: v.boolean(),
     }),
     v.null(),
   ),
@@ -69,6 +99,7 @@ export const getByRepo = query({
       spec: row.spec,
       model: row.model,
       lastViewedAt: row.lastViewedAt,
+      hasThumbnail: Boolean(row.thumbnailStorageId),
     };
   },
 });
@@ -81,6 +112,7 @@ export const save = mutation({
     label: v.optional(v.string()),
     spec: v.string(),
     model: v.optional(v.string()),
+    thumbnailStorageId: v.optional(v.id("_storage")),
   },
   returns: v.id("systemMaps"),
   handler: async (ctx, args) => {
@@ -100,11 +132,21 @@ export const save = mutation({
       .unique();
 
     if (existing) {
+      if (
+        args.thumbnailStorageId &&
+        existing.thumbnailStorageId &&
+        args.thumbnailStorageId !== existing.thumbnailStorageId
+      ) {
+        await deleteStorage(ctx, existing.thumbnailStorageId);
+      }
       await ctx.db.patch(existing._id, {
         label,
         spec: args.spec,
         model: args.model,
         lastViewedAt: now,
+        ...(args.thumbnailStorageId
+          ? { thumbnailStorageId: args.thumbnailStorageId }
+          : {}),
       });
       return existing._id;
     }
@@ -117,6 +159,7 @@ export const save = mutation({
       spec: args.spec,
       model: args.model,
       lastViewedAt: now,
+      thumbnailStorageId: args.thumbnailStorageId,
     });
   },
 });
@@ -149,6 +192,7 @@ export const remove = mutation({
     const row = await ctx.db.get(args.id);
     if (!row) return null;
     if (row.userId !== userId) throw new Error("Unauthorized");
+    await deleteStorage(ctx, row.thumbnailStorageId);
     await ctx.db.delete(args.id);
     return null;
   },

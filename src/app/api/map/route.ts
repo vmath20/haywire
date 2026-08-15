@@ -291,7 +291,7 @@ Return ONLY a JSON object with this exact shape (no markdown fences, no commenta
 }
 
 Rules:
-- 8 to 14 modules. Each is a REAL subsystem inferred from the files (group related files). Module ids are 1-3 uppercase letters, all unique.
+- 8 to 14 modules. Each is a REAL subsystem inferred from the files (group related files). Module ids are 1-3 uppercase letters, all unique. Never exceed 14 — if the repo is huge, cluster into the most important subsystems rather than listing everything.
 - 3 or 4 categories that tell a story, e.g. "The system", "The evolution loop", "What comes out" — adapt to THIS repo.
 - Every module's "files" must cite real paths from the summary. Never invent paths.
 - "stack" (1-6) = how much machinery lives inside (more symbols/connectivity = taller). "size" (1-2) = architectural importance.
@@ -490,7 +490,10 @@ export async function POST(req: NextRequest) {
               relayout: true,
             });
             if (spec.modules.length < 3) {
-              lastError = "Model returned too few modules";
+              lastError =
+                spec.modules.length === 0
+                  ? "This repository is too large to map into a readable city. Try a smaller or more focused repo."
+                  : "This repository didn't produce a readable map (too few subsystems fit the grid). Try again.";
               send({ type: "log", message: `${lastError} (${spec.modules.length})` });
               continue;
             }
