@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import type { SystemMapSpec, MapFlow } from "@/lib/systemMap";
+import { normalizeSpec, type SystemMapSpec, type MapFlow } from "@/lib/systemMap";
 import { IsoScene } from "./IsoScene";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -81,11 +81,14 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   const spec: SystemMapSpec | null = useMemo(() => {
     if (!saved?.spec) return null;
     try {
-      return JSON.parse(saved.spec) as SystemMapSpec;
+      const parsed = JSON.parse(saved.spec) as SystemMapSpec;
+      // Re-run layout normalization so maps saved before spacing rules
+      // changed get respaced (buildings never touch, labels stay visible).
+      return normalizeSpec(parsed, parsed.owner || owner, parsed.repo || repo, parsed.model);
     } catch {
       return null;
     }
-  }, [saved]);
+  }, [saved, owner, repo]);
 
   // View state
   const [selectedId, setSelectedId] = useState<string | null>(null);

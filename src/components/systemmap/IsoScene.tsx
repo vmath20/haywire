@@ -12,7 +12,7 @@ import { MAP_GRID_W, MAP_GRID_H } from "@/lib/systemMap";
 
 const HW = 34; // half tile width
 const HH = 17; // half tile height
-const LH = 11; // slab height
+const LH = 9; // slab height
 const SLAB_GAP = 2;
 
 function iso(gx: number, gy: number): { x: number; y: number } {
@@ -293,53 +293,6 @@ export function IsoScene({
           ))}
         </g>
 
-        {/* active flow paths */}
-        <g>
-          {activeSteps.map((s) => {
-            const style = KIND_STYLE[s.kind] ?? KIND_STYLE.flow!;
-            return (
-              <path
-                key={s.i}
-                d={s.d}
-                fill="none"
-                stroke={style.stroke}
-                strokeWidth={1.4}
-                strokeDasharray={style.dash}
-                opacity={0.9}
-              />
-            );
-          })}
-        </g>
-
-        {/* traced step highlight */}
-        {traced ? (
-          <path
-            d={traced.d}
-            fill="none"
-            stroke="#0b0d10"
-            strokeWidth={2.6}
-            strokeLinecap="round"
-          >
-            <animate attributeName="opacity" values="1;0.45;1" dur="1.1s" repeatCount="indefinite" />
-          </path>
-        ) : null}
-
-        {/* payload dots in motion */}
-        {motion && !paused ? (
-          <g>
-            {[0, 1, 2].map((i) => (
-              <circle key={i} r={3.4} fill="#8fd414" stroke="#ffffff" strokeWidth={1.2}>
-                <animateMotion
-                  path={motion.d}
-                  dur={`${motion.dur}s`}
-                  begin={`${(-i * motion.dur) / 3}s`}
-                  repeatCount="indefinite"
-                />
-              </circle>
-            ))}
-          </g>
-        ) : null}
-
         {/* buildings */}
         <g>
           {ordered.map((m) => (
@@ -387,6 +340,68 @@ export function IsoScene({
             );
           })}
         </g>
+
+        {/* active flow paths — rendered above buildings with a white casing
+            so payload lanes are never blocked by tall buildings */}
+        <g style={{ pointerEvents: "none" }}>
+          {activeSteps.map((s) => (
+            <path
+              key={`case-${s.i}`}
+              d={s.d}
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth={4.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.85}
+            />
+          ))}
+          {activeSteps.map((s) => {
+            const style = KIND_STYLE[s.kind] ?? KIND_STYLE.flow!;
+            return (
+              <path
+                key={s.i}
+                d={s.d}
+                fill="none"
+                stroke={style.stroke}
+                strokeWidth={1.8}
+                strokeDasharray={style.dash}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            );
+          })}
+        </g>
+
+        {/* traced step highlight */}
+        {traced ? (
+          <path
+            d={traced.d}
+            fill="none"
+            stroke="#0b0d10"
+            strokeWidth={2.6}
+            strokeLinecap="round"
+            style={{ pointerEvents: "none" }}
+          >
+            <animate attributeName="opacity" values="1;0.45;1" dur="1.1s" repeatCount="indefinite" />
+          </path>
+        ) : null}
+
+        {/* payload dots in motion — topmost so they are always visible */}
+        {motion && !paused ? (
+          <g style={{ pointerEvents: "none" }}>
+            {[0, 1, 2].map((i) => (
+              <circle key={i} r={4.2} fill="#8fd414" stroke="#ffffff" strokeWidth={1.6}>
+                <animateMotion
+                  path={motion.d}
+                  dur={`${motion.dur}s`}
+                  begin={`${(-i * motion.dur) / 3}s`}
+                  repeatCount="indefinite"
+                />
+              </circle>
+            ))}
+          </g>
+        ) : null}
 
         {/* pulse at traced step target */}
         {traced ? (
