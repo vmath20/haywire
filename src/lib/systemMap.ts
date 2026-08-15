@@ -58,8 +58,8 @@ export type SystemMapSpec = {
   model?: string;
 };
 
-export const MAP_GRID_W = 12;
-export const MAP_GRID_H = 10;
+export const MAP_GRID_W = 13;
+export const MAP_GRID_H = 11;
 
 function clampInt(n: unknown, lo: number, hi: number, fallback: number): number {
   const v = typeof n === "number" && Number.isFinite(n) ? Math.round(n) : fallback;
@@ -121,9 +121,11 @@ export function normalizeSpec(
     }
     return true;
   };
+  // Claim the footprint plus a 1-cell halo so buildings never touch and
+  // labels stay readable.
   const claimCells = (x: number, y: number, size: number) => {
-    for (let dx = 0; dx < size; dx++) {
-      for (let dy = 0; dy < size; dy++) {
+    for (let dx = -1; dx <= size; dx++) {
+      for (let dy = -1; dy <= size; dy++) {
         usedCells.add(`${x + dx},${y + dy}`);
       }
     }

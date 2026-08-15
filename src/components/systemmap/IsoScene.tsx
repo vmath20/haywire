@@ -93,7 +93,6 @@ function Building({
 
   const h = moduleHeight(m);
   const c = centerOf(m);
-  const base = iso(m.x + s / 2, m.y + s / 2);
 
   return (
     <g
@@ -119,19 +118,6 @@ function Building({
         style={{ pointerEvents: "none", userSelect: "none" }}
       >
         {m.id}
-      </text>
-      {/* name under the building */}
-      <text
-        x={base.x}
-        y={base.y + HH * s + 12}
-        textAnchor="middle"
-        fontSize={8.5}
-        fontFamily="var(--font-geist-mono), ui-monospace, monospace"
-        fill={selected ? "#aebfd9" : "#6b7690"}
-        letterSpacing="0.04em"
-        style={{ pointerEvents: "none", userSelect: "none" }}
-      >
-        {m.name.length > 22 ? `${m.name.slice(0, 21)}…` : m.name}
       </text>
       {selected ? (
         <circle cx={c.x} cy={c.y - h - 14} r={3} fill="none" stroke="#7fb0ff" strokeWidth={1}>
@@ -364,6 +350,42 @@ export function IsoScene({
               onSelect={(id) => onSelect(id)}
             />
           ))}
+        </g>
+
+        {/* name labels above everything so buildings never occlude them */}
+        <g>
+          {ordered.map((m) => {
+            const base = iso(m.x + m.size / 2, m.y + m.size / 2);
+            const label = m.name.length > 22 ? `${m.name.slice(0, 21)}…` : m.name;
+            return (
+              <g key={m.id} style={{ pointerEvents: "none", userSelect: "none" }}>
+                <text
+                  x={base.x}
+                  y={base.y + HH * m.size + 12}
+                  textAnchor="middle"
+                  fontSize={8.5}
+                  fontFamily="var(--font-geist-mono), ui-monospace, monospace"
+                  stroke="#0a0d12"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  letterSpacing="0.04em"
+                >
+                  {label}
+                </text>
+                <text
+                  x={base.x}
+                  y={base.y + HH * m.size + 12}
+                  textAnchor="middle"
+                  fontSize={8.5}
+                  fontFamily="var(--font-geist-mono), ui-monospace, monospace"
+                  fill={m.id === selectedId ? "#aebfd9" : "#6b7690"}
+                  letterSpacing="0.04em"
+                >
+                  {label}
+                </text>
+              </g>
+            );
+          })}
         </g>
 
         {/* pulse at traced step target */}
