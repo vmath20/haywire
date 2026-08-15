@@ -252,7 +252,7 @@ export function AnswerGraph({
       try {
         network.fit({ animation: false });
         const scale = network.getScale();
-        network.moveTo({ scale: scale * 0.86, animation: false });
+        network.moveTo({ scale: scale * 1.04, animation: false });
       } catch {
         // ignore empty graph
       }
@@ -293,8 +293,6 @@ export function AnswerGraph({
     );
   }
 
-  const citedCount = nodes.filter((n) => n.mentioned).length;
-
   return (
     <div
       className={clsx(
@@ -303,17 +301,6 @@ export function AnswerGraph({
       )}
     >
       <div ref={containerRef} className="absolute inset-0" />
-
-      {/* Top overlay: what this map shows */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
-        <span className="pointer-events-auto rounded-full border border-black/[0.07] bg-white/85 px-2.5 py-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#6b7280] backdrop-blur-sm">
-          answer map · {citedCount ? `${citedCount} cited · ` : ""}
-          {nodes.length} nodes
-        </span>
-        <span className="pointer-events-none rounded-full border border-black/[0.07] bg-white/85 px-2.5 py-1.5 text-[10px] font-light text-[#9ca3af] backdrop-blur-sm">
-          filled = cited · double-click opens source
-        </span>
-      </div>
 
       {/* Bottom overlay: file legend */}
       {files.length ? (

@@ -179,6 +179,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const onGraphPage = Boolean(activeOwner && activeRepo);
   const onGraphsHome = currentPath === "/dashboard";
   const onUsage = currentPath.startsWith("/dashboard/usage");
+  const onGuidance = currentPath.startsWith("/dashboard/guidance");
   const chatMatch = currentPath.match(/^\/dashboard\/query\/([^/]+)/);
   const activeChatId = chatMatch ? decodeURIComponent(chatMatch[1]) : null;
   const onQueryPage = currentPath === "/dashboard/query";
@@ -532,16 +533,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <span className={navLabelClass}>Usage</span>
             </Link>
 
-            <a
-              href="https://github.com/vmath20/haywire#readme"
-              target="_blank"
-              rel="noreferrer"
+            <Link
+              href="/dashboard/guidance"
               title="Guidance"
-              className={navItemClass(false)}
+              onClick={() => setPendingPath("/dashboard/guidance")}
+              className={navItemClass(onGuidance)}
             >
               <BookOpen className="h-4 w-4 shrink-0" strokeWidth={1.75} />
               <span className={navLabelClass}>Guidance</span>
-            </a>
+            </Link>
           </nav>
 
           <div className="mt-auto px-3 py-3">
