@@ -8,7 +8,6 @@ import { ArrowUpRight, Boxes, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { mapPath } from "@/lib/systemMap";
-import { previewFromSpecJson } from "@/lib/mapThumbnail";
 import { MapPreview } from "@/components/systemmap/MapPreview";
 import { DeletingState } from "@/components/LoadingState";
 
@@ -47,7 +46,11 @@ export function MapHome() {
         repo: m.repo,
         label: m.label || m.repo,
         href: mapPath(m.owner, m.repo),
-        preview: previewFromSpecJson(m.spec),
+        preview: {
+          categories: m.categoryIds.map((id) => ({ id })),
+          modules: m.buildings,
+          flows: [{ steps: m.flowSteps }],
+        },
       })),
     [maps],
   );

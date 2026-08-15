@@ -24,6 +24,75 @@ export const generateUploadUrl = mutation({
   },
 });
 
+const buildingValidator = v.object({
+  id: v.string(),
+  category: v.string(),
+  stack: v.number(),
+  size: v.number(),
+  x: v.number(),
+  y: v.number(),
+});
+
+const flowStepValidator = v.object({
+  from: v.string(),
+  to: v.string(),
+});
+
+function layoutFromSpec(specJson: string): {
+  buildings: {
+    id: string;
+    category: string;
+    stack: number;
+    size: number;
+    x: number;
+    y: number;
+  }[];
+  categoryIds: string[];
+  flowSteps: { from: string; to: string }[];
+} {
+  try {
+    let raw: unknown = JSON.parse(specJson);
+    if (typeof raw === "string") raw = JSON.parse(raw);
+    const obj = (raw ?? {}) as {
+      categories?: { id?: unknown }[];
+      modules?: {
+        id?: unknown;
+        category?: unknown;
+        stack?: unknown;
+        size?: unknown;
+        x?: unknown;
+        y?: unknown;
+      }[];
+      flows?: { steps?: { from?: unknown; to?: unknown }[] }[];
+    };
+    const categoryIds = (obj.categories ?? [])
+      .map((c) => String(c.id ?? "").trim())
+      .filter((id) => id.length > 0);
+    const buildings = (obj.modules ?? [])
+      .map((m) => ({
+        id: String(m.id ?? "").trim(),
+        category: String(m.category ?? "system").trim() || "system",
+        stack: Math.max(1, Math.min(6, Math.round(Number(m.stack) || 2))),
+        size: Math.max(1, Math.min(2, Math.round(Number(m.size) || 1))),
+        x: Number(m.x) || 0,
+        y: Number(m.y) || 0,
+      }))
+      .filter((m) => m.id.length > 0);
+    const flowSteps = (obj.flows ?? []).flatMap((f) =>
+      (f.steps ?? [])
+        .map((s) => ({
+          from: String(s.from ?? "").trim(),
+          to: String(s.to ?? "").trim(),
+        }))
+        .filter((s) => s.from.length > 0 && s.to.length > 0),
+    );
+    return { buildings, categoryIds, flowSteps };
+  } catch (err) {
+    console.error("[maps] spec parse failed", err);
+    return { buildings: [], categoryIds: [], flowSteps: [] };
+  }
+}
+
 /** List the signed-in user's system maps, most recent first. */
 export const listMine = query({
   args: {},
@@ -36,7 +105,9 @@ export const listMine = query({
       label: v.string(),
       model: v.optional(v.string()),
       lastViewedAt: v.number(),
-      spec: v.string(),
+      buildings: v.array(buildingValidator),
+      categoryIds: v.array(v.string()),
+      flowSteps: v.array(flowStepValidator),
     }),
   ),
   handler: async (ctx) => {
@@ -47,16 +118,21 @@ export const listMine = query({
       .withIndex("by_user_lastViewed", (q) => q.eq("userId", userId))
       .order("desc")
       .take(50);
-    return rows.map((r) => ({
-      _id: r._id,
-      _creationTime: r._creationTime,
-      owner: r.owner,
-      repo: r.repo,
-      label: r.label,
-      model: r.model,
-      lastViewedAt: r.lastViewedAt,
-      spec: r.spec,
-    }));
+    return rows.map((r) => {
+      const layout = layoutFromSpec(r.spec);
+      return {
+        _id: r._id,
+        _creationTime: r._creationTime,
+        owner: r.owner,
+        repo: r.repo,
+        label: r.label,
+        model: r.model,
+        lastViewedAt: r.lastViewedAt,
+        buildings: layout.buildings,
+        categoryIds: layout.categoryIds,
+        flowSteps: layout.flowSteps,
+      };
+    });
   },
 });
 

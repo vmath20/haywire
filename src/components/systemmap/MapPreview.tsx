@@ -1,12 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { MAP_GRID_H, MAP_GRID_W } from "@/lib/systemMap";
 import { previewPalette, type MapPreviewData } from "@/lib/mapThumbnail";
 
-const HW = 28;
-const HH = 14;
-const LH = 8;
-const SLAB_GAP = 1.8;
+/** Same isometric metrics as IsoScene so thumbnails match the real map. */
+const HW = 36;
+const HH = 18;
+const LH = 10;
+const SLAB_GAP = 2;
 
 function iso(gx: number, gy: number): { x: number; y: number } {
   return { x: (gx - gy) * HW, y: (gx + gy) * HH };
@@ -29,81 +31,65 @@ export function MapPreview({
   const categories = data?.categories ?? [];
   const flows = data?.flows ?? [];
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const m of modules) {
-    const s = Math.max(1, m.size);
-    const h = Math.max(1, m.stack) * (LH + SLAB_GAP);
-    const corners = [
-      iso(m.x, m.y),
-      iso(m.x + s, m.y),
-      iso(m.x + s, m.y + s),
-      iso(m.x, m.y + s),
-    ];
-    for (const c of corners) {
-      minX = Math.min(minX, c.x);
-      maxX = Math.max(maxX, c.x);
-      minY = Math.min(minY, c.y - h);
-      maxY = Math.max(maxY, c.y);
-    }
-  }
-
-  if (!Number.isFinite(minX)) {
-    minX = iso(0, 4).x;
-    maxX = iso(6, 0).x;
-    minY = iso(0, 0).y - 20;
-    maxY = iso(6, 4).y;
-  }
-
-  const pad = compact ? 14 : 40;
-  const vbX = minX - pad;
-  const vbY = minY - pad;
-  const vbW = Math.max(40, maxX - minX + pad * 2);
-  const vbH = Math.max(30, maxY - minY + pad * 2);
-  const byId = new Map(modules.map((m) => [m.id, m]));
-  const sorted = [...modules].sort((a, b) => a.x + a.y - (b.x + b.y));
-  const strokeW = compact ? 0.9 : 0.85;
-  const fontSize = compact ? 6 : 9;
+  const pad = compact ? 36 : 72;
+  const corners = [
+    iso(0, 0),
+    iso(MAP_GRID_W, 0),
+    iso(0, MAP_GRID_H),
+    iso(MAP_GRID_W, MAP_GRID_H),
+  ];
+  const minX = Math.min(...corners.map((c) => c.x)) - pad;
+  const maxX = Math.max(...corners.map((c) => c.x)) + pad;
+  const minY = Math.min(...corners.map((c) => c.y)) - pad - 6 * (LH + SLAB_GAP);
+  const maxY = Math.max(...corners.map((c) => c.y)) + pad;
 
   const grid: ReactNode[] = [];
-  if (!compact) {
-    const x0 = Math.floor(Math.min(...modules.map((m) => m.x), 0)) - 1;
-    const y0 = Math.floor(Math.min(...modules.map((m) => m.y), 0)) - 1;
-    const x1 = Math.ceil(Math.max(...modules.map((m) => m.x + m.size), 8)) + 1;
-    const y1 = Math.ceil(Math.max(...modules.map((m) => m.y + m.size), 6)) + 1;
-    for (let x = x0; x < x1; x++) {
-      for (let y = y0; y < y1; y++) {
-        const N = iso(x, y);
-        const E = iso(x + 1, y);
-        const S = iso(x + 1, y + 1);
-        const W = iso(x, y + 1);
-        grid.push(
-          <path
-            key={`g-${x}-${y}`}
-            d={pathOf([N, E, S, W])}
-            fill="none"
-            stroke="#d5dbe3"
-            strokeWidth={0.6}
-          />,
-        );
-      }
-    }
+  for (let gx = 0; gx <= MAP_GRID_W; gx++) {
+    const a = iso(gx, 0);
+    const b = iso(gx, MAP_GRID_H);
+    grid.push(
+      <line
+        key={`vx-${gx}`}
+        x1={a.x}
+        y1={a.y}
+        x2={b.x}
+        y2={b.y}
+        stroke="#d5dbe3"
+        strokeWidth={compact ? 0.8 : 1}
+      />,
+    );
   }
+  for (let gy = 0; gy <= MAP_GRID_H; gy++) {
+    const a = iso(0, gy);
+    const b = iso(MAP_GRID_W, gy);
+    grid.push(
+      <line
+        key={`hy-${gy}`}
+        x1={a.x}
+        y1={a.y}
+        x2={b.x}
+        y2={b.y}
+        stroke="#d5dbe3"
+        strokeWidth={compact ? 0.8 : 1}
+      />,
+    );
+  }
+
+  const byId = new Map(modules.map((m) => [m.id, m]));
+  const sorted = [...modules].sort((a, b) => a.x + a.y - (b.x + b.y));
 
   return (
     <svg
-      viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+      viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
       width="100%"
       height="100%"
       className={className}
       aria-hidden
-      preserveAspectRatio="xMidYMid meet"
+      preserveAspectRatio="xMidYMid slice"
     >
-      <rect x={vbX} y={vbY} width={vbW} height={vbH} fill="#f3f4f6" />
+      <rect x={minX} y={minY} width={maxX - minX} height={maxY - minY} fill="#f3f4f6" />
       {grid}
-      {flows.slice(0, 4).flatMap((flow, fi) =>
+      {flows.flatMap((flow, fi) =>
         flow.steps.map((step, si) => {
           const a = byId.get(step.from);
           const b = byId.get(step.to);
@@ -118,8 +104,8 @@ export function MapPreview({
               x2={pb.x}
               y2={pb.y}
               stroke="#5a9a0a"
-              strokeWidth={compact ? 1.4 : 2}
-              strokeOpacity={0.6}
+              strokeWidth={compact ? 2 : 2.4}
+              strokeOpacity={0.7}
             />
           );
         }),
@@ -127,8 +113,8 @@ export function MapPreview({
       {sorted.map((m) => {
         const pal = previewPalette(m.category, categories);
         const s = Math.max(1, m.size);
-        const slabs: ReactNode[] = [];
         const stack = Math.max(1, m.stack);
+        const slabs: ReactNode[] = [];
         for (let i = 0; i < stack; i++) {
           const zBot = i * (LH + SLAB_GAP);
           const zTop = zBot + LH;
@@ -146,8 +132,8 @@ export function MapPreview({
                   { x: W.x, y: W.y - zBot },
                 ])}
                 fill={pal.left}
-                stroke="#8b95a1"
-                strokeWidth={strokeW}
+                stroke="#5c6775"
+                strokeWidth={1}
               />
               <path
                 d={pathOf([
@@ -157,8 +143,8 @@ export function MapPreview({
                   { x: S.x, y: S.y - zBot },
                 ])}
                 fill={pal.right}
-                stroke="#8b95a1"
-                strokeWidth={strokeW}
+                stroke="#5c6775"
+                strokeWidth={1}
               />
               <path
                 d={pathOf([
@@ -168,8 +154,8 @@ export function MapPreview({
                   { x: W.x, y: W.y - zTop },
                 ])}
                 fill={pal.top}
-                stroke="#8b95a1"
-                strokeWidth={strokeW}
+                stroke="#5c6775"
+                strokeWidth={1}
               />
             </g>,
           );
@@ -182,13 +168,12 @@ export function MapPreview({
             {!compact ? (
               <text
                 x={roof.x}
-                y={roof.y - h + HH * 0.38 * s}
+                y={roof.y - h + HH * 0.4 * s}
                 textAnchor="middle"
-                fontSize={fontSize}
+                fontSize={11}
                 fontFamily="ui-monospace, monospace"
                 fontWeight={700}
-                fill="#3d4654"
-                letterSpacing="0.06em"
+                fill="#0b0d10"
               >
                 {m.id}
               </text>
