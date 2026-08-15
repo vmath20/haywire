@@ -31,7 +31,12 @@ type AnalyzeResult = {
 };
 
 const DEFAULT_MODEL =
-  process.env.OPENROUTER_MODEL?.trim() || "moonshotai/kimi-k2.6";
+  process.env.OPENROUTER_MODEL?.trim() || "z-ai/glm-5v-turbo";
+const FALLBACK_MODEL = "moonshotai/kimi-k2.6";
+const MODEL_TIMEOUT_MS: Record<string, number> = {
+  "z-ai/glm-5v-turbo": 30_000,
+  "moonshotai/kimi-k2.6": 20_000,
+};
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -418,7 +423,9 @@ export async function POST(req: NextRequest) {
 
         const summary = summarizeGraph(graph);
         const prompt = buildPrompt(owner, repo, summary);
-        const models = Array.from(new Set([DEFAULT_MODEL, "z-ai/glm-5v-turbo"]));
+        const models = Array.from(
+          new Set(["z-ai/glm-5v-turbo", DEFAULT_MODEL, FALLBACK_MODEL]),
+        );
         send({
           type: "log",
           message: `Prompt ${prompt.length} chars; models ${models.join(" → ")}`,
@@ -427,6 +434,7 @@ export async function POST(req: NextRequest) {
         let lastError = "";
         for (const model of models) {
           const t0 = Date.now();
+          const timeoutMs = MODEL_TIMEOUT_MS[model] ?? 25_000;
           send({ type: "log", message: `Calling ${model}` });
           try {
             const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -447,7 +455,7 @@ export async function POST(req: NextRequest) {
                 reasoning: { exclude: true },
                 usage: { include: true },
               }),
-              signal: AbortSignal.timeout(90_000),
+              signal: AbortSignal.timeout(timeoutMs),
             });
             const ms = Date.now() - t0;
             if (!res.ok) {

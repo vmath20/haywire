@@ -52,7 +52,6 @@ export const recordMap = mutation({
     costUsd: v.optional(v.number()),
     elapsedMs: v.optional(v.number()),
   },
-  returns: v.id("usageEvents"),
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Not authenticated");

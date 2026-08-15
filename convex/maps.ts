@@ -17,7 +17,6 @@ async function deleteStorage(
 
 export const generateUploadUrl = mutation({
   args: {},
-  returns: v.string(),
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Not authenticated");

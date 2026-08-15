@@ -10,7 +10,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
 import {
   layoutByFlow,
   normalizeSpec,
@@ -19,7 +18,6 @@ import {
   type MapFlow,
   type MapModule,
 } from "@/lib/systemMap";
-import { uploadMapThumbnail } from "@/lib/persistMap";
 import { IsoScene } from "./IsoScene";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -183,7 +181,6 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   );
   const example = useQuery(api.examples.getByRepo, { owner, repo });
   const saveMap = useMutation(api.maps.save);
-  const generateUploadUrl = useMutation(api.maps.generateUploadUrl);
   const recordMap = useMutation(api.usage.recordMap);
   const touchMap = useMutation(api.maps.touch);
 
@@ -337,22 +334,12 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
 
         setGenStatus("Saving map");
         pushLog(`Saving ${ev.spec.modules.length} modules, ${ev.spec.flows.length} flows`);
-        let thumbnailStorageId: Id<"_storage"> | undefined;
-        try {
-          const uploaded = await uploadMapThumbnail(ev.spec, generateUploadUrl);
-          if (uploaded) thumbnailStorageId = uploaded as Id<"_storage">;
-        } catch (thumbErr) {
-          pushLog(
-            `Thumbnail skipped: ${thumbErr instanceof Error ? thumbErr.message : "upload failed"}`,
-          );
-        }
         await saveMap({
           owner,
           repo,
           label: repo,
           spec: JSON.stringify(ev.spec),
           model: ev.spec.model || ev.model,
-          thumbnailStorageId,
         });
         try {
           await recordMap({
@@ -386,7 +373,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     } finally {
       setGenerating(false);
     }
-  }, [owner, repo, savedGraph, example, saveMap, recordMap, generateUploadUrl]);
+  }, [owner, repo, savedGraph, example, saveMap, recordMap]);
 
   // Kick off generation when there is no saved map yet.
   useEffect(() => {
@@ -405,34 +392,6 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       void touchMap({ owner, repo });
     }
   }, [spec, owner, repo, touchMap]);
-
-  // Backfill a thumbnail for maps saved before previews existed.
-  const thumbRef = useRef(false);
-  useEffect(() => {
-    if (!spec || !saved || saved.hasThumbnail || thumbRef.current) return;
-    if (modules.length === 0) return;
-    thumbRef.current = true;
-    const live: SystemMapSpec = {
-      ...spec,
-      modules: modules.length ? modules : spec.modules,
-    };
-    void (async () => {
-      try {
-        const uploaded = await uploadMapThumbnail(live, generateUploadUrl);
-        if (!uploaded) return;
-        await saveMap({
-          owner,
-          repo,
-          label: repo,
-          spec: JSON.stringify(live),
-          model: spec.model,
-          thumbnailStorageId: uploaded as Id<"_storage">,
-        });
-      } catch {
-        thumbRef.current = false;
-      }
-    })();
-  }, [spec, saved, modules, owner, repo, generateUploadUrl, saveMap]);
 
   const selectedModule =
     liveSpec?.modules.find((m) => m.id === selectedId) ?? null;
