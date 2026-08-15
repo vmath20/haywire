@@ -134,7 +134,7 @@ export function MapHome() {
                   href={c.href}
                   className="group block overflow-hidden border-2 border-wire-ink/20 bg-white transition hover:border-wire-ink"
                 >
-                  <div className="flex h-28 items-center justify-center bg-[#0a0d12]">
+                  <div className="flex h-28 items-center justify-center bg-[#f3f4f6]">
                     {/* mini isometric mark */}
                     <svg viewBox="-40 -30 80 60" className="h-16 w-24">
                       {[
@@ -145,29 +145,29 @@ export function MapHome() {
                         <g key={i}>
                           <path
                             d={`M ${b.x} ${b.y - b.h} l 10 5 v ${b.h * 0.8} l -10 -5 Z`}
-                            fill="#10151f"
-                            stroke="#39445a"
+                            fill="#e0e5eb"
+                            stroke="#98a2af"
                             strokeWidth={0.7}
                           />
                           <path
                             d={`M ${b.x} ${b.y - b.h} l -10 5 v ${b.h * 0.8} l 10 -5 Z`}
-                            fill="#151b27"
-                            stroke="#39445a"
+                            fill="#edf0f4"
+                            stroke="#98a2af"
                             strokeWidth={0.7}
                           />
                           <path
                             d={`M ${b.x} ${b.y - b.h} l 10 5 l -10 5 l -10 -5 Z`}
-                            fill="#1d2432"
-                            stroke="#39445a"
+                            fill="#ffffff"
+                            stroke="#98a2af"
                             strokeWidth={0.7}
                           />
                         </g>
                       ))}
                       <path
                         d="M -24 14 L 24 14"
-                        stroke="#3f7bfd"
-                        strokeWidth={0.8}
-                        opacity={0.7}
+                        stroke="#8fd414"
+                        strokeWidth={1}
+                        opacity={0.8}
                       />
                     </svg>
                   </div>

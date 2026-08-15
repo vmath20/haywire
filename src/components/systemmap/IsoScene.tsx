@@ -53,9 +53,9 @@ function routeLength(a: MapModule, b: MapModule): number {
 type StepStyle = { stroke: string; dash?: string };
 
 const KIND_STYLE: Record<string, StepStyle> = {
-  flow: { stroke: "#3f7bfd" },
-  retry: { stroke: "#8a93a6", dash: "6 5" },
-  feedback: { stroke: "#5f6d8a", dash: "2 5" },
+  flow: { stroke: "#8fd414" },
+  retry: { stroke: "#9aa4b1", dash: "6 5" },
+  feedback: { stroke: "#b3bcc7", dash: "2 5" },
 };
 
 function Building({
@@ -70,7 +70,7 @@ function Building({
   const [hover, setHover] = useState(false);
   const s = m.size;
   const slabs: React.ReactNode[] = [];
-  const stroke = selected ? "#7fb0ff" : hover ? "#55648a" : "#39445a";
+  const stroke = selected ? "#0b0d10" : hover ? "#5c6775" : "#98a2af";
 
   for (let i = 0; i < m.stack; i++) {
     const zBot = i * (LH + SLAB_GAP);
@@ -84,9 +84,9 @@ function Building({
     const right = `M ${S.x} ${S.y - zTop} L ${E.x} ${E.y - zTop} L ${E.x} ${E.y - zBot} L ${S.x} ${S.y - zBot} Z`;
     slabs.push(
       <g key={i}>
-        <path d={left} fill={selected ? "#1a2334" : "#151b27"} stroke={stroke} strokeWidth={0.8} />
-        <path d={right} fill={selected ? "#141c2b" : "#10151f"} stroke={stroke} strokeWidth={0.8} />
-        <path d={top} fill={selected ? "#232e44" : "#1d2432"} stroke={stroke} strokeWidth={0.8} />
+        <path d={left} fill={selected ? "#ecf6cd" : "#edf0f4"} stroke={stroke} strokeWidth={0.8} />
+        <path d={right} fill={selected ? "#e2eec0" : "#e0e5eb"} stroke={stroke} strokeWidth={0.8} />
+        <path d={top} fill={selected ? "#f7ffe3" : "#fbfcfd"} stroke={stroke} strokeWidth={0.8} />
       </g>,
     );
   }
@@ -113,14 +113,14 @@ function Building({
         fontSize={9.5}
         fontFamily="var(--font-geist-mono), ui-monospace, monospace"
         fontWeight={600}
-        fill={selected ? "#cfe0ff" : "#9aa7bd"}
+        fill={selected ? "#0b0d10" : "#5c6775"}
         letterSpacing="0.08em"
         style={{ pointerEvents: "none", userSelect: "none" }}
       >
         {m.id}
       </text>
       {selected ? (
-        <circle cx={c.x} cy={c.y - h - 14} r={3} fill="none" stroke="#7fb0ff" strokeWidth={1}>
+        <circle cx={c.x} cy={c.y - h - 14} r={3} fill="none" stroke="#8fd414" strokeWidth={1.4}>
           <animate attributeName="r" values="2;6;2" dur="2s" repeatCount="indefinite" />
           <animate attributeName="opacity" values="1;0.2;1" dur="2s" repeatCount="indefinite" />
         </circle>
@@ -280,7 +280,7 @@ export function IsoScene({
               y1={l.y1}
               x2={l.x2}
               y2={l.y2}
-              stroke="#151b27"
+              stroke="#e8ecf1"
               strokeWidth={1}
             />
           ))}
@@ -289,7 +289,7 @@ export function IsoScene({
         {/* faint inactive flow paths */}
         <g>
           {faintPaths.map((d, i) => (
-            <path key={i} d={d} fill="none" stroke="#232b3c" strokeWidth={1} />
+            <path key={i} d={d} fill="none" stroke="#dfe4ea" strokeWidth={1} />
           ))}
         </g>
 
@@ -316,7 +316,7 @@ export function IsoScene({
           <path
             d={traced.d}
             fill="none"
-            stroke="#b7d2ff"
+            stroke="#0b0d10"
             strokeWidth={2.6}
             strokeLinecap="round"
           >
@@ -328,7 +328,7 @@ export function IsoScene({
         {motion && !paused ? (
           <g>
             {[0, 1, 2].map((i) => (
-              <circle key={i} r={3.4} fill="#6ea8ff" stroke="#0a0d14" strokeWidth={1}>
+              <circle key={i} r={3.4} fill="#8fd414" stroke="#ffffff" strokeWidth={1.2}>
                 <animateMotion
                   path={motion.d}
                   dur={`${motion.dur}s`}
@@ -365,7 +365,7 @@ export function IsoScene({
                   textAnchor="middle"
                   fontSize={8.5}
                   fontFamily="var(--font-geist-mono), ui-monospace, monospace"
-                  stroke="#0a0d12"
+                  stroke="#fcfcfd"
                   strokeWidth={3}
                   strokeLinejoin="round"
                   letterSpacing="0.04em"
@@ -378,7 +378,7 @@ export function IsoScene({
                   textAnchor="middle"
                   fontSize={8.5}
                   fontFamily="var(--font-geist-mono), ui-monospace, monospace"
-                  fill={m.id === selectedId ? "#aebfd9" : "#6b7690"}
+                  fill={m.id === selectedId ? "#0b0d10" : "#5c6775"}
                   letterSpacing="0.04em"
                 >
                   {label}
@@ -395,7 +395,7 @@ export function IsoScene({
             cy={centerOf(traced.to).y - moduleHeight(traced.to) - 8}
             r={4}
             fill="none"
-            stroke="#b7d2ff"
+            stroke="#0b0d10"
             strokeWidth={1.4}
           >
             <animate attributeName="r" values="3;9;3" dur="1.1s" repeatCount="indefinite" />

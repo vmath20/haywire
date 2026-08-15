@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * Full-screen isometric system-map viewer: dark control-room layout with a
- * top stats bar, module registry on the left, the IsoScene canvas in the
- * middle, and a WHAT IT DOES / HOW IT'S BUILT explainer panel on the right.
+ * Full-screen isometric system-map viewer: a top stats bar, module registry
+ * on the left, the IsoScene canvas in the middle, and a WHAT IT DOES /
+ * HOW IT'S BUILT explainer panel on the right. Styled to match the app's
+ * light paper-and-ink theme with the lime signal accent.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,48 +12,35 @@ import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { SystemMapSpec, MapFlow } from "@/lib/systemMap";
 import { IsoScene } from "./IsoScene";
+import { LoadingState } from "@/components/LoadingState";
 
 const GEN_PHRASES = [
-  "cloning repository…",
-  "parsing symbols…",
-  "tracing dependencies…",
-  "clustering modules…",
-  "raising buildings…",
-  "routing payload lanes…",
-  "writing the field notes…",
+  "Cloning the repository…",
+  "Parsing symbols…",
+  "Tracing dependencies…",
+  "Clustering modules…",
+  "Raising buildings…",
+  "Routing payload lanes…",
+  "Writing the field notes…",
 ];
 
-function GeneratingScreen({ status }: { status: string }) {
+function GeneratingScreen({ status, note }: { status: string; note?: string }) {
   const [phrase, setPhrase] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setPhrase((p) => (p + 1) % GEN_PHRASES.length), 2600);
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-5 bg-[#0a0d12] font-mono">
-      <div className="flex items-end gap-1.5">
-        {[0, 1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className="w-3 rounded-[2px]"
-            style={{
-              height: `${14 + (i % 3) * 10}px`,
-              backgroundColor: "#232b3c",
-              animation: `map-slab 1.4s ease-in-out ${i * 0.18}s infinite`,
-            }}
-          />
-        ))}
-      </div>
-      <p className="text-[12px] uppercase tracking-[0.22em] text-[#8b96a9]">{status}</p>
-      <p className="text-[11px] tracking-[0.12em] text-[#4c5568]">{GEN_PHRASES[phrase]}</p>
-      <style>{`@keyframes map-slab { 0%,100% { transform: scaleY(0.5); opacity: 0.4; } 50% { transform: scaleY(1); opacity: 1; } }`}</style>
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-white">
+      <LoadingState label={status} />
+      <p className="text-xs text-wire-mute">{note || GEN_PHRASES[phrase]}</p>
     </div>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="px-3 pb-1.5 pt-4 text-[9.5px] uppercase tracking-[0.2em] text-[#4c5568]">
+    <p className="px-3 pb-1.5 pt-4 font-mono text-[9.5px] uppercase tracking-[0.2em] text-wire-mute/70">
       {children}
     </p>
   );
@@ -63,7 +51,7 @@ function FileChip({ name }: { name: string }) {
   return (
     <span
       title={name}
-      className="inline-block rounded-sm bg-[#1a212f] px-1.5 py-0.5 text-[10px] text-[#9aa7bd]"
+      className="inline-block rounded-sm bg-[#f4f4f5] px-1.5 py-0.5 font-mono text-[10px] text-wire-mute"
     >
       {short}
     </span>
@@ -85,7 +73,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   const touchMap = useMutation(api.maps.touch);
 
   const [generating, setGenerating] = useState(false);
-  const [genStatus, setGenStatus] = useState("analyzing repository");
+  const [genStatus, setGenStatus] = useState("Analyzing repository");
+  const [genNote, setGenNote] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
@@ -113,7 +102,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   const generate = useCallback(async () => {
     setGenerating(true);
     setError(null);
-    setGenStatus("analyzing repository");
+    setGenStatus("Analyzing repository");
+    setGenNote(undefined);
     try {
       const graphUrl = savedGraph?.graphUrl || example?.graphUrl || null;
       // Retry loop: the backend may still be building the code graph.
@@ -124,7 +114,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
           body: JSON.stringify({ owner, repo, graph_url: graphUrl }),
         });
         if (res.status === 202) {
-          setGenStatus("building the code graph — this can take a few minutes");
+          setGenStatus("Building code graph");
+          setGenNote("This can take a few minutes for large repositories.");
           await new Promise((r) => setTimeout(r, 12_000));
           continue;
         }
@@ -135,7 +126,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
         if (!res.ok || !data.spec) {
           throw new Error(data.detail || `Map generation failed (${res.status})`);
         }
-        setGenStatus("saving map");
+        setGenStatus("Saving map");
+        setGenNote(undefined);
         await saveMap({
           owner,
           repo,
@@ -177,18 +169,18 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#0a0d12] px-8 font-mono">
-        <p className="text-[12px] uppercase tracking-[0.22em] text-[#c97878]">
-          map generation failed
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-white px-8">
+        <p className="font-mono text-[12px] uppercase tracking-[0.22em] text-wire-ember">
+          Map generation failed
         </p>
-        <p className="max-w-md text-center text-[12px] leading-relaxed text-[#8b96a9]">{error}</p>
+        <p className="max-w-md text-center text-sm leading-relaxed text-wire-mute">{error}</p>
         <button
           type="button"
           onClick={() => {
             startedRef.current = false;
             void generate();
           }}
-          className="mt-2 border border-[#39445a] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-[#c9d3e0] transition hover:border-[#7fb0ff] hover:text-white"
+          className="mt-2 border-2 border-wire-ink/20 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-wire-ink transition hover:border-wire-ink"
         >
           Retry
         </button>
@@ -197,35 +189,42 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   }
 
   if (!spec || generating) {
-    return <GeneratingScreen status={generating ? genStatus : "loading map"} />;
+    return (
+      <GeneratingScreen
+        status={generating ? genStatus : "Loading map"}
+        note={generating ? genNote : undefined}
+      />
+    );
   }
 
   const stats = spec.stats.slice(0, 4);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0a0d12] font-mono text-[#c9d3e0]">
+    <div className="flex h-full min-h-0 flex-col bg-white text-wire-ink">
       {/* ── Top bar ─────────────────────────────────────────────── */}
-      <header className="flex shrink-0 items-stretch border-b border-[#1c2330]">
-        <div className="flex min-w-0 flex-col justify-center border-r border-[#1c2330] px-4 py-2.5">
-          <p className="text-[9px] uppercase tracking-[0.22em] text-[#4c5568]">Repository</p>
-          <p className="truncate text-[12.5px] font-semibold text-[#e8edf5]">
+      <header className="flex shrink-0 items-stretch border-b border-black/10">
+        <div className="flex min-w-0 flex-col justify-center border-r border-black/10 px-4 py-2.5">
+          <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-wire-mute/70">
+            Repository
+          </p>
+          <p className="truncate font-mono text-[12.5px] font-semibold text-wire-ink">
             {owner}/{repo}
           </p>
         </div>
         {stats.map((s) => (
           <div
             key={s.label}
-            className="hidden flex-col justify-center border-r border-[#1c2330] px-4 py-2.5 md:flex"
+            className="hidden flex-col justify-center border-r border-black/10 px-4 py-2.5 md:flex"
           >
-            <p className="whitespace-nowrap text-[9px] uppercase tracking-[0.22em] text-[#4c5568]">
+            <p className="whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.22em] text-wire-mute/70">
               {s.label}
             </p>
-            <p className="text-[12.5px] text-[#e8edf5]">{s.value}</p>
+            <p className="font-mono text-[12.5px] text-wire-ink">{s.value}</p>
           </div>
         ))}
         <div className="ml-auto flex items-center gap-2 px-3">
           {flows.length > 0 ? (
-            <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-[#4c5568]">
+            <label className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-wire-mute/70">
               Flow
               <select
                 value={activeFlow?.id ?? ""}
@@ -234,7 +233,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
                   setTraceIndex(null);
                   setSelectedId(null);
                 }}
-                className="border border-[#39445a] bg-[#10151f] px-2 py-1.5 text-[11px] normal-case tracking-normal text-[#e8edf5] outline-none"
+                className="border-2 border-wire-ink/20 bg-white px-2 py-1.5 font-mono text-[11px] normal-case tracking-normal text-wire-ink outline-none transition focus:border-wire-ink"
               >
                 {flows.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -247,7 +246,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
           <button
             type="button"
             onClick={() => setPaused((p) => !p)}
-            className="border border-[#39445a] px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-[#c9d3e0] transition hover:border-[#7fb0ff]"
+            className="border-2 border-wire-ink/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-wire-ink transition hover:border-wire-ink"
           >
             {paused ? "Resume flow" : "Pause flow"}
           </button>
@@ -260,7 +259,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
                 i === null ? 0 : (i + 1) % activeFlow.steps.length,
               );
             }}
-            className="hidden border border-[#39445a] px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-[#c9d3e0] transition hover:border-[#7fb0ff] sm:block"
+            className="hidden border-2 border-wire-ink/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-wire-ink transition hover:border-wire-ink sm:block"
           >
             Trace one step
           </button>
@@ -272,7 +271,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
               setPaused(false);
               setSelectedId(null);
             }}
-            className="border border-[#39445a] px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-[#c9d3e0] transition hover:border-[#7fb0ff]"
+            className="border-2 border-wire-ink/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-wire-ink transition hover:border-wire-ink"
           >
             Reset view
           </button>
@@ -282,7 +281,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       {/* ── Body ────────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1">
         {/* left: module registry */}
-        <aside className="hidden w-52 shrink-0 overflow-y-auto border-r border-[#1c2330] pb-4 lg:block">
+        <aside className="hidden w-52 shrink-0 overflow-y-auto border-r border-black/10 pb-4 lg:block">
           {spec.categories.map((cat) => {
             const mods = spec.modules.filter((m) => m.category === cat.id);
             if (mods.length === 0) return null;
@@ -302,15 +301,17 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
                           }}
                           className={`flex w-full items-center gap-2 border px-2 py-1.5 text-left transition ${
                             active
-                              ? "border-[#7fb0ff] bg-[#131a29] text-[#e8edf5]"
-                              : "border-[#242d3f] text-[#9aa7bd] hover:border-[#39445a] hover:text-[#c9d3e0]"
+                              ? "border-wire-ink bg-[#f4f4f5] text-wire-ink"
+                              : "border-black/10 text-wire-mute hover:border-wire-ink/40 hover:text-wire-ink"
                           }`}
                         >
-                          <span className="w-6 shrink-0 text-[9.5px] font-semibold tracking-[0.08em] text-[#5f6d8a]">
+                          <span className="w-6 shrink-0 font-mono text-[9.5px] font-semibold tracking-[0.08em] text-wire-mute/70">
                             {m.id}
                           </span>
                           <span className="min-w-0 flex-1 truncate text-[11px]">{m.name}</span>
-                          <span className="text-[9.5px] text-[#4c5568]">{m.stack}</span>
+                          <span className="font-mono text-[9.5px] text-wire-mute/60">
+                            {m.stack}
+                          </span>
                         </button>
                       </li>
                     );
@@ -322,18 +323,18 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
         </aside>
 
         {/* center: isometric canvas */}
-        <div className="relative min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1 bg-[#fcfcfd]">
           <div className="pointer-events-none absolute left-4 top-3 z-10">
-            <p className="text-[9px] uppercase tracking-[0.22em] text-[#4c5568]">
+            <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-wire-mute/70">
               Runtime topology
             </p>
-            <p className="text-[15px] font-semibold text-[#e8edf5]">
+            <p className="font-display text-[15px] font-bold tracking-tight text-wire-ink">
               {activeFlow?.name ?? spec.title}
             </p>
           </div>
           <div className="pointer-events-none absolute right-4 top-3 z-10 flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#3f7bfd]" />
-            <span className="text-[9px] uppercase tracking-[0.2em] text-[#4c5568]">
+            <span className="h-1.5 w-1.5 rounded-full bg-wire-signalDeep" />
+            <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-wire-mute/70">
               payloads in motion
             </span>
           </div>
@@ -353,29 +354,30 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
           />
 
           {/* legend */}
-          <div className="pointer-events-none absolute bottom-3 left-4 z-10 flex items-center gap-4 text-[9.5px] uppercase tracking-[0.14em] text-[#5f6d8a]">
+          <div className="pointer-events-none absolute bottom-3 left-4 z-10 flex items-center gap-4 font-mono text-[9.5px] uppercase tracking-[0.14em] text-wire-mute">
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-px w-5 bg-[#3f7bfd]" /> flow
+              <span className="inline-block h-[2px] w-5 bg-wire-signalDeep" /> flow
             </span>
             <span className="flex items-center gap-1.5">
               <span
-                className="inline-block h-px w-5"
+                className="inline-block h-[2px] w-5"
                 style={{
                   backgroundImage:
-                    "repeating-linear-gradient(90deg,#8a93a6 0 5px,transparent 5px 9px)",
+                    "repeating-linear-gradient(90deg,#9aa4b1 0 5px,transparent 5px 9px)",
                 }}
               />{" "}
               retry
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#6ea8ff]" /> payload
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-wire-signalDeep" />{" "}
+              payload
             </span>
             <span className="flex items-center gap-1.5">
               <span
-                className="inline-block h-px w-5"
+                className="inline-block h-[2px] w-5"
                 style={{
                   backgroundImage:
-                    "repeating-linear-gradient(90deg,#5f6d8a 0 2px,transparent 2px 6px)",
+                    "repeating-linear-gradient(90deg,#b3bcc7 0 2px,transparent 2px 6px)",
                 }}
               />{" "}
               feedback
@@ -384,15 +386,15 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
         </div>
 
         {/* right: explainer panel */}
-        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-[#1c2330] md:flex">
-          <div className="flex shrink-0 border-b border-[#1c2330]">
+        <aside className="hidden w-72 shrink-0 flex-col overflow-y-auto border-l border-black/10 md:flex">
+          <div className="flex shrink-0 border-b border-black/10">
             <button
               type="button"
               onClick={() => setTab("what")}
-              className={`flex-1 px-3 py-2.5 text-[10px] uppercase tracking-[0.16em] transition ${
+              className={`flex-1 px-3 py-2.5 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
                 tab === "what"
-                  ? "bg-[#e8edf5] font-semibold text-[#0a0d12]"
-                  : "text-[#5f6d8a] hover:text-[#c9d3e0]"
+                  ? "bg-wire-ink font-semibold text-white"
+                  : "text-wire-mute hover:text-wire-ink"
               }`}
             >
               What it does
@@ -400,10 +402,10 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
             <button
               type="button"
               onClick={() => setTab("how")}
-              className={`flex-1 px-3 py-2.5 text-[10px] uppercase tracking-[0.16em] transition ${
+              className={`flex-1 px-3 py-2.5 font-mono text-[10px] uppercase tracking-[0.16em] transition ${
                 tab === "how"
-                  ? "bg-[#e8edf5] font-semibold text-[#0a0d12]"
-                  : "text-[#5f6d8a] hover:text-[#c9d3e0]"
+                  ? "bg-wire-ink font-semibold text-white"
+                  : "text-wire-mute hover:text-wire-ink"
               }`}
             >
               How it&apos;s built
@@ -414,10 +416,10 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
             {selectedModule ? (
               <>
                 <SectionLabel>Selected module</SectionLabel>
-                <p className="px-3 text-[14px] font-semibold leading-snug text-[#e8edf5]">
+                <p className="px-3 font-display text-[15px] font-bold leading-snug tracking-tight text-wire-ink">
                   {selectedModule.name}
                 </p>
-                <p className="mt-3 whitespace-pre-line px-3 text-[11.5px] leading-relaxed text-[#9aa7bd]">
+                <p className="mt-3 whitespace-pre-line px-3 text-[12px] leading-relaxed text-wire-mute">
                   {tab === "what"
                     ? selectedModule.what
                     : selectedModule.how || "No implementation notes generated."}
@@ -436,16 +438,16 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
             ) : activeFlow ? (
               <>
                 <SectionLabel>Selected flow</SectionLabel>
-                <p className="px-3 text-[14px] font-semibold leading-snug text-[#e8edf5]">
+                <p className="px-3 font-display text-[15px] font-bold leading-snug tracking-tight text-wire-ink">
                   {activeFlow.name}
                 </p>
                 {activeFlow.tagline ? (
-                  <p className="mt-2 px-3 text-[11px] leading-relaxed text-[#5f6d8a]">
+                  <p className="mt-2 px-3 font-mono text-[11px] leading-relaxed text-wire-mute/80">
                     {activeFlow.tagline}
                   </p>
                 ) : null}
-                <div className="mx-3 my-3 border-t border-[#1c2330]" />
-                <p className="whitespace-pre-line px-3 text-[11.5px] leading-relaxed text-[#9aa7bd]">
+                <div className="mx-3 my-3 border-t border-black/10" />
+                <p className="whitespace-pre-line px-3 text-[12px] leading-relaxed text-wire-mute">
                   {tab === "what" ? activeFlow.what || spec.what : spec.how}
                 </p>
                 {activeFlow.sources.length > 0 ? (
@@ -460,7 +462,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
                 ) : null}
                 <SectionLabel>Payload</SectionLabel>
                 <div className="px-3">
-                  <span className="inline-block bg-[#e8edf5] px-1.5 py-0.5 text-[10px] font-semibold text-[#0a0d12]">
+                  <span className="inline-block bg-wire-signal px-1.5 py-0.5 font-mono text-[10px] font-semibold text-wire-ink">
                     {activeFlow.payload}
                   </span>
                 </div>
@@ -468,7 +470,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
             ) : (
               <>
                 <SectionLabel>{spec.title}</SectionLabel>
-                <p className="whitespace-pre-line px-3 text-[11.5px] leading-relaxed text-[#9aa7bd]">
+                <p className="whitespace-pre-line px-3 text-[12px] leading-relaxed text-wire-mute">
                   {tab === "what" ? spec.what : spec.how}
                 </p>
               </>
@@ -476,8 +478,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
 
             {!selectedModule ? (
               <>
-                <div className="mx-3 my-4 border-t border-[#1c2330]" />
-                <p className="px-3 text-[10px] leading-relaxed tracking-[0.06em] text-[#4c5568]">
+                <div className="mx-3 my-4 border-t border-black/10" />
+                <p className="px-3 font-mono text-[10px] leading-relaxed tracking-[0.06em] text-wire-mute/70">
                   {spec.tagline}
                 </p>
               </>
@@ -487,11 +489,11 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       </div>
 
       {/* ── Bottom hint bar ─────────────────────────────────────── */}
-      <footer className="flex shrink-0 items-center justify-between border-t border-[#1c2330] px-4 py-1.5">
-        <p className="text-[9.5px] uppercase tracking-[0.18em] text-[#4c5568]">
+      <footer className="flex shrink-0 items-center justify-between border-t border-black/10 px-4 py-1.5">
+        <p className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-wire-mute/70">
           select a module · inspect a payload · pause the flow · trace one step
         </p>
-        <p className="hidden text-[9.5px] uppercase tracking-[0.18em] text-[#333c4e] sm:block">
+        <p className="hidden font-mono text-[9.5px] uppercase tracking-[0.18em] text-wire-mute/50 sm:block">
           drag to pan · scroll to zoom
         </p>
       </footer>
