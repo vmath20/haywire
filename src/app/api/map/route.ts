@@ -445,6 +445,7 @@ export async function POST(req: NextRequest) {
                 max_tokens: 6000,
                 response_format: { type: "json_object" },
                 reasoning: { exclude: true },
+                usage: { include: true },
               }),
               signal: AbortSignal.timeout(90_000),
             });
@@ -461,12 +462,22 @@ export async function POST(req: NextRequest) {
             const data = (await res.json()) as {
               model?: string;
               choices?: { message?: { content?: string } }[];
-              usage?: { total_tokens?: number };
+              usage?: {
+                prompt_tokens?: number;
+                completion_tokens?: number;
+                total_tokens?: number;
+                cost?: number;
+              };
             };
             const content = data.choices?.[0]?.message?.content ?? "";
+            const promptTokens = data.usage?.prompt_tokens ?? 0;
+            const completionTokens = data.usage?.completion_tokens ?? 0;
+            const totalTokens =
+              data.usage?.total_tokens ?? promptTokens + completionTokens;
+            const costUsd = typeof data.usage?.cost === "number" ? data.usage.cost : 0;
             send({
               type: "log",
-              message: `${model} ok in ${ms}ms, ${content.length} chars, ${data.usage?.total_tokens ?? 0} tokens`,
+              message: `${model} ok in ${ms}ms, ${content.length} chars, ${totalTokens} tokens, $${costUsd.toFixed(4)}`,
             });
             const raw = extractJson(content);
             if (!raw) {
@@ -484,7 +495,15 @@ export async function POST(req: NextRequest) {
               continue;
             }
 
-            send({ type: "done", spec, total_tokens: data.usage?.total_tokens ?? 0 });
+            send({
+              type: "done",
+              spec,
+              model: data.model || model,
+              prompt_tokens: promptTokens,
+              completion_tokens: completionTokens,
+              total_tokens: totalTokens,
+              cost_usd: costUsd,
+            });
             return;
           } catch (err) {
             const name = err instanceof Error ? err.name : "";

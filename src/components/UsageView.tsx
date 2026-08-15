@@ -252,7 +252,7 @@ export function UsageView() {
     );
   }
 
-  const { chat, graph, activity, period } = summary;
+  const { chat, graph, map, activity, period } = summary;
   const cur = period.current;
   const prev = period.previous;
 
@@ -463,6 +463,24 @@ export function UsageView() {
               <dt className="text-[11px] text-wire-mute">Nodes processed</dt>
               <dd className="mt-0.5 font-semibold tabular-nums">
                 {formatTokens(graph.nodesProcessed)}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-[#fafafa] px-3 py-2.5">
+              <dt className="text-[11px] text-wire-mute">Map generations</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums">
+                {(map?.count ?? 0).toLocaleString()}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-[#fafafa] px-3 py-2.5">
+              <dt className="text-[11px] text-wire-mute">Map tokens</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums">
+                {formatTokens(map?.totalTokens ?? 0)}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-[#fafafa] px-3 py-2.5">
+              <dt className="text-[11px] text-wire-mute">Map spend</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums">
+                {formatUsd(map?.costUsd ?? 0)}
               </dd>
             </div>
           </dl>

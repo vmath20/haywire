@@ -106,7 +106,7 @@ export default defineSchema({
   /** Per-user metering for chat (OpenRouter) and graph builds (Graphify). */
   usageEvents: defineTable({
     userId: v.id("users"),
-    kind: v.union(v.literal("chat"), v.literal("graph")),
+    kind: v.union(v.literal("chat"), v.literal("graph"), v.literal("map")),
     at: v.number(),
     owner: v.optional(v.string()),
     repo: v.optional(v.string()),

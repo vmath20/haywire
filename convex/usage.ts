@@ -40,6 +40,45 @@ export const recordChat = mutation({
   },
 });
 
+export const recordMap = mutation({
+  args: {
+    owner: v.string(),
+    repo: v.string(),
+    label: v.optional(v.string()),
+    model: v.optional(v.string()),
+    promptTokens: v.optional(v.number()),
+    completionTokens: v.optional(v.number()),
+    totalTokens: v.optional(v.number()),
+    costUsd: v.optional(v.number()),
+    elapsedMs: v.optional(v.number()),
+  },
+  returns: v.id("usageEvents"),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Not authenticated");
+    const prompt = Math.max(0, Math.floor(args.promptTokens ?? 0));
+    const completion = Math.max(0, Math.floor(args.completionTokens ?? 0));
+    const total =
+      args.totalTokens != null
+        ? Math.max(0, Math.floor(args.totalTokens))
+        : prompt + completion;
+    return await ctx.db.insert("usageEvents", {
+      userId,
+      kind: "map",
+      at: Date.now(),
+      owner: args.owner.trim(),
+      repo: args.repo.trim(),
+      label: args.label?.trim() || args.repo.trim(),
+      model: args.model,
+      promptTokens: prompt || undefined,
+      completionTokens: completion || undefined,
+      totalTokens: total || undefined,
+      costUsd: args.costUsd != null ? Math.max(0, args.costUsd) : 0,
+      elapsedMs: args.elapsedMs,
+    });
+  },
+});
+
 export const recordGraph = mutation({
   args: {
     owner: v.string(),
@@ -109,6 +148,10 @@ export const summaryMine = query({
     let graphBuildsDay = 0;
     let graphBuildsMonth = 0;
 
+    let mapCount = 0;
+    let mapTokens = 0;
+    let mapCost = 0;
+
     const dayMap = new Map<string, { count: number; chat: number; graph: number }>();
 
     function dayKey(ts: number): string {
@@ -152,20 +195,20 @@ export const summaryMine = query({
     const cur = { costUsd: 0, tokens: 0, requests: 0, builds: 0 };
 
     for (const e of events) {
+      const isLlm = e.kind === "chat" || e.kind === "map";
       if (e.at >= yearAgo) {
         const key = dayKey(e.at);
         const row = dayMap.get(key) ?? { count: 0, chat: 0, graph: 0 };
         row.count += 1;
-        if (e.kind === "chat") row.chat += 1;
-        else row.graph += 1;
+        if (e.kind === "graph") row.graph += 1;
+        else row.chat += 1;
         dayMap.set(key, row);
       }
 
       {
-        const tokens =
-          e.kind === "chat"
-            ? (e.totalTokens ?? (e.promptTokens ?? 0) + (e.completionTokens ?? 0))
-            : 0;
+        const tokens = isLlm
+          ? (e.totalTokens ?? (e.promptTokens ?? 0) + (e.completionTokens ?? 0))
+          : 0;
         const cost = e.costUsd ?? 0;
         if (e.at >= monthAgo) {
           cur.costUsd += cost;
@@ -177,7 +220,7 @@ export const summaryMine = query({
           if (daily) {
             daily.costUsd += cost;
             daily.requests += 1;
-            if (e.kind === "chat") {
+            if (isLlm) {
               daily.chatRequests += 1;
               daily.promptTokens += e.promptTokens ?? 0;
               daily.completionTokens += e.completionTokens ?? 0;
@@ -213,6 +256,10 @@ export const summaryMine = query({
           chatTokensMonth += tokens;
           chatCostMonth += cost;
         }
+      } else if (e.kind === "map") {
+        mapCount += 1;
+        mapTokens += e.totalTokens ?? (e.promptTokens ?? 0) + (e.completionTokens ?? 0);
+        mapCost += e.costUsd ?? 0;
       } else {
         graphBuilds += 1;
         if (e.cached) graphCached += 1;
@@ -259,6 +306,11 @@ export const summaryMine = query({
         costUsd: graphCost,
         buildsDay: graphBuildsDay,
         buildsMonth: graphBuildsMonth,
+      },
+      map: {
+        count: mapCount,
+        totalTokens: mapTokens,
+        costUsd: mapCost,
       },
       activity: {
         days: activity,

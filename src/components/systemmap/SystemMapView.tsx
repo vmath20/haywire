@@ -95,6 +95,11 @@ async function readMapResponse(res: Response): Promise<{
   spec?: SystemMapSpec;
   detail?: string;
   building?: boolean;
+  model?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost_usd?: number;
 }> {
   const text = await res.text();
   try {
@@ -111,7 +116,7 @@ type MapStreamEvent =
   | { type: "log"; message: string }
   | { type: "status"; status: string; note?: string }
   | { type: "building"; detail?: string }
-  | { type: "done"; spec: SystemMapSpec }
+  | { type: "done"; spec: SystemMapSpec; model?: string; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost_usd?: number }
   | { type: "error"; detail: string };
 
 async function consumeMapStream(
@@ -122,7 +127,17 @@ async function consumeMapStream(
   if (!ctype.includes("event-stream") || !res.body) {
     const data = await readMapResponse(res);
     if (data.building) return { type: "building", detail: data.detail };
-    if (data.spec) return { type: "done", spec: data.spec };
+    if (data.spec) {
+      return {
+        type: "done",
+        spec: data.spec,
+        model: data.model,
+        prompt_tokens: data.prompt_tokens,
+        completion_tokens: data.completion_tokens,
+        total_tokens: data.total_tokens,
+        cost_usd: data.cost_usd,
+      };
+    }
     return {
       type: "error",
       detail: data.detail || `Map generation failed (${res.status})`,
@@ -174,6 +189,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   );
   const example = useQuery(api.examples.getByRepo, { owner, repo });
   const saveMap = useMutation(api.maps.save);
+  const recordMap = useMutation(api.usage.recordMap);
   const touchMap = useMutation(api.maps.touch);
 
   const [generating, setGenerating] = useState(false);
@@ -340,8 +356,27 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
           repo,
           label: repo,
           spec: JSON.stringify(ev.spec),
-          model: ev.spec.model,
+          model: ev.spec.model || ev.model,
         });
+        try {
+          await recordMap({
+            owner,
+            repo,
+            label: repo,
+            model: ev.spec.model || ev.model,
+            promptTokens: ev.prompt_tokens,
+            completionTokens: ev.completion_tokens,
+            totalTokens: ev.total_tokens,
+            costUsd: ev.cost_usd,
+          });
+          pushLog(
+            `Metered ${ev.total_tokens ?? 0} tokens (${ev.cost_usd != null ? `$${ev.cost_usd.toFixed(4)}` : "n/a"})`,
+          );
+        } catch (meterErr) {
+          const meterMsg =
+            meterErr instanceof Error ? meterErr.message : "usage record failed";
+          pushLog(`Usage not recorded: ${meterMsg}`);
+        }
         pushLog("Saved");
         return;
       }
@@ -355,7 +390,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     } finally {
       setGenerating(false);
     }
-  }, [owner, repo, savedGraph, example, saveMap]);
+  }, [owner, repo, savedGraph, example, saveMap, recordMap]);
 
   // Kick off generation when there is no saved map yet.
   useEffect(() => {
