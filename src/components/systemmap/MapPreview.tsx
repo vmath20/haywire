@@ -25,20 +25,17 @@ export function MapPreview({
   compact?: boolean;
   className?: string;
 }) {
-  if (!data || data.modules.length === 0) {
-    return (
-      <div className={className} style={{ background: "#f3f4f6" }} aria-hidden />
-    );
-  }
+  const modules = data?.modules ?? [];
+  const categories = data?.categories ?? [];
+  const flows = data?.flows ?? [];
 
-  const modules = data.modules;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const m of modules) {
-    const s = m.size;
-    const h = m.stack * (LH + SLAB_GAP);
+    const s = Math.max(1, m.size);
+    const h = Math.max(1, m.stack) * (LH + SLAB_GAP);
     const corners = [
       iso(m.x, m.y),
       iso(m.x + s, m.y),
@@ -53,26 +50,60 @@ export function MapPreview({
     }
   }
 
-  const pad = compact ? 18 : 36;
+  if (!Number.isFinite(minX)) {
+    minX = iso(0, 4).x;
+    maxX = iso(6, 0).x;
+    minY = iso(0, 0).y - 20;
+    maxY = iso(6, 4).y;
+  }
+
+  const pad = compact ? 14 : 40;
   const vbX = minX - pad;
   const vbY = minY - pad;
-  const vbW = Math.max(1, maxX - minX + pad * 2);
-  const vbH = Math.max(1, maxY - minY + pad * 2);
+  const vbW = Math.max(40, maxX - minX + pad * 2);
+  const vbH = Math.max(30, maxY - minY + pad * 2);
   const byId = new Map(modules.map((m) => [m.id, m]));
   const sorted = [...modules].sort((a, b) => a.x + a.y - (b.x + b.y));
-  const strokeW = compact ? 0.9 : 0.8;
-  const fontSize = compact ? 7 : 9;
+  const strokeW = compact ? 0.9 : 0.85;
+  const fontSize = compact ? 6 : 9;
+
+  const grid: ReactNode[] = [];
+  if (!compact) {
+    const x0 = Math.floor(Math.min(...modules.map((m) => m.x), 0)) - 1;
+    const y0 = Math.floor(Math.min(...modules.map((m) => m.y), 0)) - 1;
+    const x1 = Math.ceil(Math.max(...modules.map((m) => m.x + m.size), 8)) + 1;
+    const y1 = Math.ceil(Math.max(...modules.map((m) => m.y + m.size), 6)) + 1;
+    for (let x = x0; x < x1; x++) {
+      for (let y = y0; y < y1; y++) {
+        const N = iso(x, y);
+        const E = iso(x + 1, y);
+        const S = iso(x + 1, y + 1);
+        const W = iso(x, y + 1);
+        grid.push(
+          <path
+            key={`g-${x}-${y}`}
+            d={pathOf([N, E, S, W])}
+            fill="none"
+            stroke="#d5dbe3"
+            strokeWidth={0.6}
+          />,
+        );
+      }
+    }
+  }
 
   return (
     <svg
       viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+      width="100%"
+      height="100%"
       className={className}
-      style={{ display: "block", width: "100%", height: "100%" }}
       aria-hidden
       preserveAspectRatio="xMidYMid meet"
     >
       <rect x={vbX} y={vbY} width={vbW} height={vbH} fill="#f3f4f6" />
-      {data.flows.slice(0, 4).flatMap((flow, fi) =>
+      {grid}
+      {flows.slice(0, 4).flatMap((flow, fi) =>
         flow.steps.map((step, si) => {
           const a = byId.get(step.from);
           const b = byId.get(step.to);
@@ -87,17 +118,18 @@ export function MapPreview({
               x2={pb.x}
               y2={pb.y}
               stroke="#5a9a0a"
-              strokeWidth={compact ? 1.4 : 1.8}
-              strokeOpacity={0.55}
+              strokeWidth={compact ? 1.4 : 2}
+              strokeOpacity={0.6}
             />
           );
         }),
       )}
       {sorted.map((m) => {
-        const pal = previewPalette(m.category, data.categories);
-        const s = m.size;
+        const pal = previewPalette(m.category, categories);
+        const s = Math.max(1, m.size);
         const slabs: ReactNode[] = [];
-        for (let i = 0; i < m.stack; i++) {
+        const stack = Math.max(1, m.stack);
+        for (let i = 0; i < stack; i++) {
           const zBot = i * (LH + SLAB_GAP);
           const zTop = zBot + LH;
           const N = iso(m.x, m.y);
@@ -143,14 +175,14 @@ export function MapPreview({
           );
         }
         const roof = iso(m.x + s / 2, m.y + s / 2);
-        const h = m.stack * (LH + SLAB_GAP);
+        const h = stack * (LH + SLAB_GAP);
         return (
           <g key={m.id}>
             {slabs}
             {!compact ? (
               <text
                 x={roof.x}
-                y={roof.y - h + HH * 0.35 * s}
+                y={roof.y - h + HH * 0.38 * s}
                 textAnchor="middle"
                 fontSize={fontSize}
                 fontFamily="ui-monospace, monospace"

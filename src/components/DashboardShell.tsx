@@ -621,11 +621,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                           )}
                           title={`${m.owner}/${m.repo}`}
                         >
-                          <span className="grid h-5 w-7 shrink-0 place-items-center overflow-hidden rounded-[3px] bg-[#f3f4f6] ring-1 ring-black/10">
+                          <span className="relative h-5 w-7 shrink-0 overflow-hidden rounded-[3px] bg-[#f3f4f6] ring-1 ring-black/10">
                             <MapPreview
                               data={m.preview}
                               compact
-                              className="h-full w-full"
+                              className="absolute inset-0 h-full w-full"
                             />
                           </span>
                           <span className="truncate">{m.label}</span>

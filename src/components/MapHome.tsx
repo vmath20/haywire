@@ -136,10 +136,10 @@ export function MapHome() {
                   href={c.href}
                   className="group block overflow-hidden border-2 border-wire-ink/20 bg-white transition hover:border-wire-ink"
                 >
-                  <div className="relative flex h-32 items-center justify-center overflow-hidden bg-[#f3f4f6]">
+                  <div className="relative h-36 w-full overflow-hidden bg-[#f3f4f6]">
                     <MapPreview
                       data={c.preview}
-                      className="h-full w-full transition group-hover:scale-[1.03]"
+                      className="absolute inset-0 h-full w-full transition duration-200 group-hover:scale-[1.04]"
                     />
                   </div>
                   <div className="px-4 py-3">
