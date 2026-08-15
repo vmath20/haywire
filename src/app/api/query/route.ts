@@ -314,41 +314,103 @@ export async function POST(req: NextRequest) {
         let costUsd = 0;
         let lastError = "";
 
+        /**
+         * One streaming round against OpenRouter. Forwards content deltas to
+         * `onDelta`, accumulates usage, and reports the finish_reason so the
+         * caller can detect truncated output ("length", or null when the
+         * upstream stream dropped mid-generation).
+         */
+        const streamRound = async (
+          model: string,
+          msgs: { role: "system" | "user" | "assistant"; content: string }[],
+          onDelta: (delta: string) => void,
+        ): Promise<{ ok: boolean; finishReason: string | null; error?: string }> => {
+          const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer":
+                process.env.NEXT_PUBLIC_SITE_URL || "https://haywire-omega.vercel.app",
+              "X-Title": "Haywire",
+            },
+            body: JSON.stringify({
+              model,
+              messages: msgs,
+              temperature: 0.2,
+              max_tokens: 4096,
+              stream: true,
+              stream_options: { include_usage: true },
+              // Never surface chain-of-thought for reasoning-capable models.
+              reasoning: { exclude: true },
+            }),
+          });
+
+          if (!orRes.ok || !orRes.body) {
+            const data = await orRes.json().catch(() => ({}));
+            return {
+              ok: false,
+              finishReason: null,
+              error:
+                (data as { error?: { message?: string } }).error?.message ||
+                `OpenRouter ${orRes.status}`,
+            };
+          }
+
+          const reader = orRes.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let finishReason: string | null = null;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) continue;
+              const payload = trimmed.slice(5).trim();
+              if (!payload || payload === "[DONE]") continue;
+              try {
+                const json = JSON.parse(payload) as {
+                  model?: string;
+                  choices?: {
+                    delta?: { content?: string };
+                    finish_reason?: string | null;
+                  }[];
+                  usage?: {
+                    prompt_tokens?: number;
+                    completion_tokens?: number;
+                    total_tokens?: number;
+                    cost?: number;
+                  };
+                };
+                if (json.model) usedModel = json.model;
+                const choice = json.choices?.[0];
+                if (choice?.delta?.content) onDelta(choice.delta.content);
+                if (choice?.finish_reason) finishReason = choice.finish_reason;
+                if (json.usage) {
+                  // Usage arrives once per stream; sum across rounds.
+                  promptTokens += json.usage.prompt_tokens ?? 0;
+                  completionTokens += json.usage.completion_tokens ?? 0;
+                  totalTokens += json.usage.total_tokens ?? 0;
+                  if (typeof json.usage.cost === "number") costUsd += json.usage.cost;
+                }
+              } catch {
+                // ignore partial JSON
+              }
+            }
+          }
+
+          return { ok: true, finishReason };
+        };
+
         for (const model of models) {
           try {
-            const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": "application/json",
-                "HTTP-Referer":
-                  process.env.NEXT_PUBLIC_SITE_URL || "https://haywire-omega.vercel.app",
-                "X-Title": "Haywire",
-              },
-              body: JSON.stringify({
-                model,
-                messages,
-                temperature: 0.2,
-                max_tokens: 1800,
-                stream: true,
-                stream_options: { include_usage: true },
-                // Never surface chain-of-thought for reasoning-capable models.
-                reasoning: { exclude: true },
-              }),
-            });
-
-            if (!orRes.ok || !orRes.body) {
-              const data = await orRes.json().catch(() => ({}));
-              lastError =
-                (data as { error?: { message?: string } }).error?.message ||
-                `OpenRouter ${orRes.status}`;
-              continue;
-            }
-
             usedModel = model;
-            const reader = orRes.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
             fullText = "";
 
             // Hold tokens until "## Answer" appears so leaked reasoning
@@ -376,58 +438,55 @@ export async function POST(req: NextRequest) {
                 held = "";
               }
             };
-            const flushHeld = () => {
-              if (!forwarding && held) {
-                send({ type: "token", text: held });
-                held = "";
-              }
-            };
 
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() || "";
-
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed.startsWith("data:")) continue;
-                const payload = trimmed.slice(5).trim();
-                if (!payload || payload === "[DONE]") continue;
-                try {
-                  const json = JSON.parse(payload) as {
-                    model?: string;
-                    choices?: { delta?: { content?: string } }[];
-                    usage?: {
-                      prompt_tokens?: number;
-                      completion_tokens?: number;
-                      total_tokens?: number;
-                      cost?: number;
-                    };
-                  };
-                  if (json.model) usedModel = json.model;
-                  const delta = json.choices?.[0]?.delta?.content;
-                  if (delta) forward(delta);
-                  if (json.usage) {
-                    promptTokens = json.usage.prompt_tokens ?? promptTokens;
-                    completionTokens = json.usage.completion_tokens ?? completionTokens;
-                    totalTokens = json.usage.total_tokens ?? totalTokens;
-                    if (typeof json.usage.cost === "number") costUsd = json.usage.cost;
-                  }
-                } catch {
-                  // ignore partial JSON
-                }
-              }
+            const first = await streamRound(model, messages, forward);
+            if (!first.ok) {
+              lastError = first.error || "OpenRouter request failed";
+              usedModel = null;
+              continue;
+            }
+            if (!forwarding && held) {
+              send({ type: "token", text: held });
+              held = "";
+            }
+            fullText = stripLeakedReasoning(fullText);
+            if (!fullText.trim()) {
+              lastError = "Empty model response";
+              usedModel = null;
+              continue;
             }
 
-            flushHeld();
-            fullText = stripLeakedReasoning(fullText);
-            if (fullText.trim()) break;
-            lastError = "Empty model response";
-            usedModel = null;
+            // Truncation guard: finish_reason "stop" means the model finished
+            // on its own. Anything else ("length" = token cap, null = the
+            // upstream stream dropped) means the answer was cut off — ask the
+            // same model to continue from where it stopped, up to twice.
+            let finishReason = first.finishReason;
+            for (let round = 0; finishReason !== "stop" && round < 2; round++) {
+              const cont = await streamRound(
+                model,
+                [
+                  ...messages,
+                  { role: "assistant" as const, content: fullText },
+                  {
+                    role: "user" as const,
+                    content:
+                      "Your previous message was cut off mid-output. Continue EXACTLY " +
+                      "where it stopped — do not repeat any earlier text, do not restart " +
+                      "sections or headings, output only the remaining continuation.",
+                  },
+                ],
+                (delta) => {
+                  fullText += delta;
+                  send({ type: "token", text: delta });
+                },
+              );
+              if (!cont.ok) break;
+              finishReason = cont.finishReason;
+            }
+            break;
           } catch (err) {
             lastError = err instanceof Error ? err.message : "OpenRouter request failed";
+            usedModel = null;
           }
         }
 

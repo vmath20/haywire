@@ -389,6 +389,7 @@ async function streamQuery(
   let graphContext = "";
   let traversal: TraversalPath | null = null;
   let answer = "";
+  let sawDone = false;
   let usage: StreamUsage = {
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -430,6 +431,7 @@ async function streamQuery(
       } else if (evt.type === "error") {
         throw new Error(typeof evt.detail === "string" ? evt.detail : "Query failed");
       } else if (evt.type === "done") {
+        sawDone = true;
         usage = {
           prompt_tokens: Number(evt.prompt_tokens) || 0,
           completion_tokens: Number(evt.completion_tokens) || 0,
@@ -443,6 +445,12 @@ async function streamQuery(
         };
       }
     }
+  }
+
+  // Never accept a stream that ended without the server's final event —
+  // whatever accumulated is a truncated answer and must not be saved.
+  if (!sawDone) {
+    throw new Error("STREAM_DROPPED");
   }
 
   if (!usage.answer) usage.answer = answer;
@@ -1559,26 +1567,42 @@ export function QueryChatView({ chatId }: { chatId: Id<"queryChats"> }) {
       setLiveContext(null);
       setLiveTraversal(null);
       try {
-        const usage = await streamQuery(
-          {
-            owner: chat.owner,
-            repo: chat.repo,
-            question: userQuestion,
-            graphUrl: resolvedGraphUrl,
-            history,
-          },
-          {
-            onStatus: (m) => setStatus(m),
-            onMeta: (meta) => {
-              setLiveContext(meta.graph_context);
-              setLiveTraversal(meta.traversal);
+        const runStream = () =>
+          streamQuery(
+            {
+              owner: chat.owner,
+              repo: chat.repo,
+              question: userQuestion,
+              graphUrl: resolvedGraphUrl,
+              history,
             },
-            onToken: (t) => {
-              setStatus(null);
-              setStreaming((prev) => prev + t);
+            {
+              onStatus: (m) => setStatus(m),
+              onMeta: (meta) => {
+                setLiveContext(meta.graph_context);
+                setLiveTraversal(meta.traversal);
+              },
+              onToken: (t) => {
+                setStatus(null);
+                setStreaming((prev) => prev + t);
+              },
             },
-          },
-        );
+          );
+
+        let usage: Awaited<ReturnType<typeof runStream>>;
+        try {
+          usage = await runStream();
+        } catch (err) {
+          // Dropped connections get one silent retry from scratch — a partial
+          // answer is never shown or saved.
+          const dropped =
+            err instanceof Error &&
+            (err.message === "STREAM_DROPPED" || /network|fetch|load failed/i.test(err.message));
+          if (!dropped) throw err;
+          setStreaming("");
+          setStatus("Connection dropped — retrying…");
+          usage = await runStream();
+        }
 
         if (!usage.answer.trim()) {
           throw new Error(
@@ -1630,7 +1654,12 @@ export function QueryChatView({ chatId }: { chatId: Id<"queryChats"> }) {
         setLiveContext(null);
         setLiveTraversal(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Query failed");
+        const message = err instanceof Error ? err.message : "Query failed";
+        setError(
+          message === "STREAM_DROPPED"
+            ? "The connection dropped mid-answer. Please ask again."
+            : message,
+        );
         setStreaming("");
       } finally {
         setLoading(false);
