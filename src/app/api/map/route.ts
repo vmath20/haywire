@@ -255,7 +255,7 @@ Rules:
 - 3 or 4 categories that tell a story, e.g. "The system", "The evolution loop", "What comes out" — adapt to THIS repo.
 - Every module's "files" must cite real paths from the summary. Never invent paths.
 - "stack" (1-6) = how much machinery lives inside (more symbols/connectivity = taller). "size" (1-2) = architectural importance.
-- Positions: grid is ${MAP_GRID_W} wide (x) by ${MAP_GRID_H} deep (y). Spread modules out; put entry points near the top-left, core processing in the middle, outputs to the right. No two modules on the same cell.
+- Positions: grid is ${MAP_GRID_W} wide (x) by ${MAP_GRID_H} deep (y). The renderer will re-lay modules along the primary flow as an avenue (entry left → output right), so x/y are hints only. Still avoid stacking two modules on the same cell.
 - 2 to 4 flows tracing REAL paths along file dependencies (steps must follow plausible edges from the summary). kind is "flow" for the main path, "retry" for retry/fallback hops, "feedback" for loops back.
 - "payload" names the actual data structure or artifact moving through the flow, using a real name from the summary when one exists.
 - 4 stats, specific to this repo (module counts, flow counts, distinct file types, etc.). Keep values short.
@@ -361,7 +361,9 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const spec = normalizeSpec(raw, owner, repo, data.model || model);
+      const spec = normalizeSpec(raw, owner, repo, data.model || model, {
+        relayout: true,
+      });
       if (spec.modules.length < 3) {
         lastError = "Model returned too few modules";
         continue;

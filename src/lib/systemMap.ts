@@ -56,10 +56,13 @@ export type SystemMapSpec = {
   stats: { label: string; value: string }[];
   generatedAt: number;
   model?: string;
+  /** Bump when the automatic avenue layout changes so saved maps can be relaid. */
+  layoutVersion?: number;
 };
 
-export const MAP_GRID_W = 13;
-export const MAP_GRID_H = 11;
+export const MAP_GRID_W = 16;
+export const MAP_GRID_H = 12;
+export const LAYOUT_VERSION = 2;
 
 function clampInt(n: unknown, lo: number, hi: number, fallback: number): number {
   const v = typeof n === "number" && Number.isFinite(n) ? Math.round(n) : fallback;
@@ -78,6 +81,199 @@ function asStringArray(v: unknown, max = 8): string[] {
     .slice(0, max);
 }
 
+export function cellKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+/** True when `id` can sit at (x, y) without overlapping another footprint. */
+export function moduleFits(
+  modules: MapModule[],
+  id: string,
+  x: number,
+  y: number,
+): boolean {
+  const moving = modules.find((m) => m.id === id);
+  if (!moving) return false;
+  if (x < 0 || y < 0 || x + moving.size > MAP_GRID_W || y + moving.size > MAP_GRID_H) {
+    return false;
+  }
+  for (const m of modules) {
+    if (m.id === id) continue;
+    if (x < m.x + m.size && x + moving.size > m.x && y < m.y + m.size && y + moving.size > m.y) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Spiral out from a desired cell until the module fits. */
+export function nearestFree(
+  modules: MapModule[],
+  id: string,
+  x: number,
+  y: number,
+): { x: number; y: number } {
+  const moving = modules.find((m) => m.id === id);
+  if (!moving) return { x: 0, y: 0 };
+  const cx = clampInt(x, 0, MAP_GRID_W - moving.size, 0);
+  const cy = clampInt(y, 0, MAP_GRID_H - moving.size, 0);
+  if (moduleFits(modules, id, cx, cy)) return { x: cx, y: cy };
+  for (let radius = 1; radius < Math.max(MAP_GRID_W, MAP_GRID_H); radius++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const nx = clampInt(cx + dx, 0, MAP_GRID_W - moving.size, 0);
+        const ny = clampInt(cy + dy, 0, MAP_GRID_H - moving.size, 0);
+        if (moduleFits(modules, id, nx, ny)) return { x: nx, y: ny };
+      }
+    }
+  }
+  return { x: cx, y: cy };
+}
+
+export function moveModule(
+  modules: MapModule[],
+  id: string,
+  x: number,
+  y: number,
+): MapModule[] {
+  const spot = nearestFree(modules, id, x, y);
+  return modules.map((m) => (m.id === id ? { ...m, x: spot.x, y: spot.y } : m));
+}
+
+/**
+ * Place modules so the primary runtime flow is a readable avenue:
+ * entry on the left, processing down the middle, outputs on the right.
+ * Supporting modules sit on side streets next to the neighbor they talk to.
+ */
+export function layoutByFlow(modules: MapModule[], flows: MapFlow[]): MapModule[] {
+  if (modules.length === 0) return modules;
+
+  const byId = new Map(modules.map((m) => [m.id, m]));
+  const pos = new Map<string, { x: number; y: number }>();
+  const used = new Set<string>();
+
+  const footprintFree = (x: number, y: number, size: number): boolean => {
+    if (x < 0 || y < 0 || x + size > MAP_GRID_W || y + size > MAP_GRID_H) return false;
+    for (let dx = -1; dx <= size; dx++) {
+      for (let dy = -1; dy <= size; dy++) {
+        const cx = x + dx;
+        const cy = y + dy;
+        if (cx < 0 || cy < 0 || cx >= MAP_GRID_W || cy >= MAP_GRID_H) continue;
+        if (dx >= 0 && dx < size && dy >= 0 && dy < size) {
+          if (used.has(cellKey(cx, cy))) return false;
+        } else if (used.has(cellKey(cx, cy))) {
+          // halo: allow touching the map edge, but not another building
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  const claim = (x: number, y: number, size: number) => {
+    for (let dx = 0; dx < size; dx++) {
+      for (let dy = 0; dy < size; dy++) {
+        used.add(cellKey(x + dx, y + dy));
+      }
+    }
+  };
+
+  const spiralFrom = (x: number, y: number, size: number): { x: number; y: number } | null => {
+    const sx = clampInt(x, 0, MAP_GRID_W - size, 0);
+    const sy = clampInt(y, 0, MAP_GRID_H - size, 0);
+    if (footprintFree(sx, sy, size)) return { x: sx, y: sy };
+    for (let radius = 1; radius < Math.max(MAP_GRID_W, MAP_GRID_H); radius++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const nx = clampInt(sx + dx, 0, MAP_GRID_W - size, 0);
+          const ny = clampInt(sy + dy, 0, MAP_GRID_H - size, 0);
+          if (footprintFree(nx, ny, size)) return { x: nx, y: ny };
+        }
+      }
+    }
+    return null;
+  };
+
+  const place = (id: string, x: number, y: number) => {
+    const m = byId.get(id);
+    if (!m || pos.has(id)) return;
+    const spot = spiralFrom(x, y, m.size);
+    if (!spot) return;
+    pos.set(id, spot);
+    claim(spot.x, spot.y, m.size);
+  };
+
+  const neighbors = new Map<string, Set<string>>();
+  const addEdge = (a: string, b: string) => {
+    if (!neighbors.has(a)) neighbors.set(a, new Set());
+    if (!neighbors.has(b)) neighbors.set(b, new Set());
+    neighbors.get(a)!.add(b);
+    neighbors.get(b)!.add(a);
+  };
+  for (const f of flows) {
+    for (const s of f.steps) addEdge(s.from, s.to);
+  }
+
+  const spineFlow = [...flows].sort((a, b) => b.steps.length - a.steps.length)[0];
+  const spine: string[] = [];
+  if (spineFlow) {
+    for (const s of spineFlow.steps) {
+      if (byId.has(s.from) && !spine.includes(s.from)) spine.push(s.from);
+      if (byId.has(s.to) && !spine.includes(s.to)) spine.push(s.to);
+    }
+  }
+  if (spine.length === 0) {
+    for (const m of modules) spine.push(m.id);
+  }
+
+  let avenueY = Math.max(2, Math.floor(MAP_GRID_H / 2) - 1);
+  const gap = 2;
+  let cursorX = 1;
+  for (let i = 0; i < spine.length; i++) {
+    const m = byId.get(spine[i]!);
+    if (!m || pos.has(m.id)) continue;
+    const y = avenueY + (i % 2 === 0 ? 0 : 1);
+    place(m.id, cursorX, y);
+    cursorX += m.size + gap;
+    if (cursorX > MAP_GRID_W - 3) {
+      cursorX = 1;
+      avenueY = Math.min(avenueY + 4, MAP_GRID_H - 3);
+    }
+  }
+
+  const rest = modules
+    .filter((m) => !pos.has(m.id))
+    .sort((a, b) => {
+      const an = [...(neighbors.get(a.id) ?? [])].filter((id) => pos.has(id)).length;
+      const bn = [...(neighbors.get(b.id) ?? [])].filter((id) => pos.has(id)).length;
+      return bn - an;
+    });
+
+  for (const m of rest) {
+    const placedNeighbors = [...(neighbors.get(m.id) ?? [])]
+      .map((id) => pos.get(id))
+      .filter((p): p is { x: number; y: number } => !!p);
+    const anchor = placedNeighbors[0] ?? { x: Math.floor(MAP_GRID_W / 2), y: avenueY };
+    place(m.id, anchor.x, anchor.y - 3);
+    if (!pos.has(m.id)) place(m.id, anchor.x, anchor.y + 3);
+    if (!pos.has(m.id)) place(m.id, anchor.x + 3, anchor.y);
+  }
+
+  return modules.map((m) => {
+    const p = pos.get(m.id);
+    return p ? { ...m, x: p.x, y: p.y } : m;
+  });
+}
+
+export type NormalizeOptions = {
+  /** Keep saved x/y; only unstick exact overlaps. Used when loading a map. */
+  preserveLayout?: boolean;
+  /** After validating, arrange modules along the primary flow avenue. */
+  relayout?: boolean;
+};
+
 /**
  * Validate and repair a raw LLM-produced spec: clamp coordinates, resolve
  * grid collisions, drop steps that reference unknown modules, and guarantee
@@ -88,7 +284,10 @@ export function normalizeSpec(
   owner: string,
   repo: string,
   model?: string,
+  options?: NormalizeOptions,
 ): SystemMapSpec {
+  const preserveLayout = options?.preserveLayout === true;
+  const relayout = options?.relayout === true;
   const r = (raw ?? {}) as Record<string, unknown>;
 
   const categoriesRaw = Array.isArray(r.categories) ? r.categories : [];
@@ -116,21 +315,20 @@ export function normalizeSpec(
   const cellsFree = (x: number, y: number, size: number): boolean => {
     for (let dx = 0; dx < size; dx++) {
       for (let dy = 0; dy < size; dy++) {
-        if (usedCells.has(`${x + dx},${y + dy}`)) return false;
+        if (usedCells.has(cellKey(x + dx, y + dy))) return false;
       }
     }
     return true;
   };
-  // Claim the footprint plus a 1-cell halo so buildings never touch and
-  // labels stay readable.
   const claimCells = (x: number, y: number, size: number) => {
-    for (let dx = -1; dx <= size; dx++) {
-      for (let dy = -1; dy <= size; dy++) {
-        usedCells.add(`${x + dx},${y + dy}`);
+    const halo = preserveLayout ? 0 : 1;
+    for (let dx = -halo; dx < size + halo; dx++) {
+      for (let dy = -halo; dy < size + halo; dy++) {
+        if (halo === 0 && (dx < 0 || dy < 0 || dx >= size || dy >= size)) continue;
+        usedCells.add(cellKey(x + dx, y + dy));
       }
     }
   };
-  /** Nudge to the nearest free spot (spiral search). */
   const placeNear = (x: number, y: number, size: number): { x: number; y: number } => {
     for (let radius = 0; radius < Math.max(MAP_GRID_W, MAP_GRID_H); radius++) {
       for (let dx = -radius; dx <= radius; dx++) {
@@ -158,8 +356,8 @@ export function normalizeSpec(
     if (!catIds.has(category)) category = categories[0]!.id;
 
     const size = clampInt(obj.size, 1, 2, 1);
-    const wantX = clampInt(obj.x, 0, MAP_GRID_W - size, Math.floor(Math.random() * MAP_GRID_W));
-    const wantY = clampInt(obj.y, 0, MAP_GRID_H - size, Math.floor(Math.random() * MAP_GRID_H));
+    const wantX = clampInt(obj.x, 0, MAP_GRID_W - size, 1);
+    const wantY = clampInt(obj.y, 0, MAP_GRID_H - size, 1);
     const spot = cellsFree(wantX, wantY, size) ? { x: wantX, y: wantY } : placeNear(wantX, wantY, size);
     claimCells(spot.x, spot.y, size);
 
@@ -229,6 +427,8 @@ export function normalizeSpec(
     if (stats.length >= 4) break;
   }
 
+  const laidOut = relayout ? layoutByFlow(modules, flows) : modules;
+
   return {
     owner,
     repo,
@@ -237,11 +437,16 @@ export function normalizeSpec(
     what: asString(r.what, "No overview generated."),
     how: asString(r.how, ""),
     categories,
-    modules,
+    modules: laidOut,
     flows,
     stats,
-    generatedAt: Date.now(),
+    generatedAt: typeof r.generatedAt === "number" ? r.generatedAt : Date.now(),
     model,
+    layoutVersion: relayout
+      ? LAYOUT_VERSION
+      : typeof r.layoutVersion === "number"
+        ? r.layoutVersion
+        : undefined,
   };
 }
 

@@ -10,7 +10,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import { normalizeSpec, type SystemMapSpec, type MapFlow } from "@/lib/systemMap";
+import {
+  layoutByFlow,
+  normalizeSpec,
+  LAYOUT_VERSION,
+  type SystemMapSpec,
+  type MapFlow,
+  type MapModule,
+} from "@/lib/systemMap";
 import { IsoScene } from "./IsoScene";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -82,13 +89,69 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     if (!saved?.spec) return null;
     try {
       const parsed = JSON.parse(saved.spec) as SystemMapSpec;
-      // Re-run layout normalization so maps saved before spacing rules
-      // changed get respaced (buildings never touch, labels stay visible).
-      return normalizeSpec(parsed, parsed.owner || owner, parsed.repo || repo, parsed.model);
+      return normalizeSpec(
+        parsed,
+        parsed.owner || owner,
+        parsed.repo || repo,
+        parsed.model,
+        { preserveLayout: true },
+      );
     } catch {
       return null;
     }
   }, [saved, owner, repo]);
+
+  const specKey = spec ? `${spec.owner}/${spec.repo}:${spec.generatedAt}` : "";
+  const specKeyRef = useRef("");
+  const [modules, setModules] = useState<MapModule[]>([]);
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persistModules = useCallback(
+    (next: MapModule[]) => {
+      if (!spec) return;
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+      persistTimer.current = setTimeout(() => {
+        void saveMap({
+          owner,
+          repo,
+          label: repo,
+          spec: JSON.stringify({ ...spec, modules: next, layoutVersion: LAYOUT_VERSION }),
+          model: spec.model,
+        });
+      }, 450);
+    },
+    [spec, owner, repo, saveMap],
+  );
+
+  useEffect(() => {
+    if (!spec) return;
+    if (specKeyRef.current === specKey) return;
+    specKeyRef.current = specKey;
+    const needsLayout = spec.layoutVersion !== LAYOUT_VERSION;
+    const next = needsLayout ? layoutByFlow(spec.modules, spec.flows) : spec.modules;
+    setModules(next);
+    if (needsLayout) persistModules(next);
+  }, [spec, specKey, persistModules]);
+
+  const handleMove = useCallback(
+    (id: string, x: number, y: number) => {
+      setModules((prev) => {
+        const cur = prev.find((m) => m.id === id);
+        if (!cur || (cur.x === x && cur.y === y)) return prev;
+        const next = prev.map((m) => (m.id === id ? { ...m, x, y } : m));
+        persistModules(next);
+        return next;
+      });
+    },
+    [persistModules],
+  );
+
+  const handleResetLayout = useCallback(() => {
+    if (!spec) return;
+    const next = layoutByFlow(modules.length ? modules : spec.modules, spec.flows);
+    setModules(next);
+    persistModules(next);
+  }, [spec, modules, persistModules]);
 
   // View state
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -97,6 +160,10 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   const [traceIndex, setTraceIndex] = useState<number | null>(null);
   const [tab, setTab] = useState<"what" | "how">("what");
   const [resetNonce, setResetNonce] = useState(0);
+
+  const liveSpec: SystemMapSpec | null = spec
+    ? { ...spec, modules: modules.length ? modules : spec.modules }
+    : null;
 
   const flows = spec?.flows ?? [];
   const activeFlow: MapFlow | null =
@@ -168,7 +235,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     }
   }, [spec, owner, repo, touchMap]);
 
-  const selectedModule = spec?.modules.find((m) => m.id === selectedId) ?? null;
+  const selectedModule =
+    liveSpec?.modules.find((m) => m.id === selectedId) ?? null;
 
   if (error) {
     return (
@@ -191,7 +259,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     );
   }
 
-  if (!spec || generating) {
+  if (!liveSpec || generating) {
     return (
       <GeneratingScreen
         status={generating ? genStatus : "Loading map"}
@@ -200,7 +268,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     );
   }
 
-  const stats = spec.stats.slice(0, 4);
+  const stats = liveSpec.stats.slice(0, 4);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white text-wire-ink">
@@ -278,6 +346,13 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
           >
             Reset view
           </button>
+          <button
+            type="button"
+            onClick={handleResetLayout}
+            className="border-2 border-wire-ink/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-wire-ink transition hover:border-wire-ink"
+          >
+            Reset layout
+          </button>
         </div>
       </header>
 
@@ -285,8 +360,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       <div className="flex min-h-0 flex-1">
         {/* left: module registry */}
         <aside className="hidden w-52 shrink-0 overflow-y-auto border-r border-black/10 pb-4 lg:block">
-          {spec.categories.map((cat) => {
-            const mods = spec.modules.filter((m) => m.category === cat.id);
+          {liveSpec.categories.map((cat, catIndex) => {
+            const mods = liveSpec.modules.filter((m) => m.category === cat.id);
             if (mods.length === 0) return null;
             return (
               <div key={cat.id}>
@@ -308,6 +383,14 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
                               : "border-black/10 text-wire-mute hover:border-wire-ink/40 hover:text-wire-ink"
                           }`}
                         >
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{
+                              background: ["#8fd414", "#98a2af", "#c4a06a", "#7a8eaa", "#a1a1aa"][
+                                catIndex % 5
+                              ],
+                            }}
+                          />
                           <span className="w-6 shrink-0 font-mono text-[9.5px] font-semibold tracking-[0.08em] text-wire-mute/70">
                             {m.id}
                           </span>
@@ -329,10 +412,10 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
         <div className="relative min-w-0 flex-1 bg-[#fcfcfd]">
           <div className="pointer-events-none absolute left-4 top-3 z-10">
             <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-wire-mute/70">
-              Runtime topology
+              Runtime topology · drag buildings to rearrange
             </p>
             <p className="font-display text-[15px] font-bold tracking-tight text-wire-ink">
-              {activeFlow?.name ?? spec.title}
+              {activeFlow?.name ?? liveSpec.title}
             </p>
           </div>
           <div className="pointer-events-none absolute right-4 top-3 z-10 flex items-center gap-1.5">
@@ -343,8 +426,9 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
           </div>
 
           <IsoScene
-            modules={spec.modules}
+            modules={liveSpec.modules}
             flows={flows}
+            categories={liveSpec.categories}
             activeFlow={activeFlow}
             paused={paused}
             traceIndex={traceIndex}
@@ -353,6 +437,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
               setSelectedId(id);
               if (id) setTab("what");
             }}
+            onMove={handleMove}
             resetNonce={resetNonce}
           />
 
@@ -451,7 +536,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
                 ) : null}
                 <div className="mx-3 my-3 border-t border-black/10" />
                 <p className="whitespace-pre-line px-3 text-[12px] leading-relaxed text-wire-mute">
-                  {tab === "what" ? activeFlow.what || spec.what : spec.how}
+                  {tab === "what" ? activeFlow.what || liveSpec.what : liveSpec.how}
                 </p>
                 {activeFlow.sources.length > 0 ? (
                   <>
@@ -472,9 +557,9 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
               </>
             ) : (
               <>
-                <SectionLabel>{spec.title}</SectionLabel>
+                <SectionLabel>{liveSpec.title}</SectionLabel>
                 <p className="whitespace-pre-line px-3 text-[12px] leading-relaxed text-wire-mute">
-                  {tab === "what" ? spec.what : spec.how}
+                  {tab === "what" ? liveSpec.what : liveSpec.how}
                 </p>
               </>
             )}
@@ -483,7 +568,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
               <>
                 <div className="mx-3 my-4 border-t border-black/10" />
                 <p className="px-3 font-mono text-[10px] leading-relaxed tracking-[0.06em] text-wire-mute/70">
-                  {spec.tagline}
+                  {liveSpec.tagline}
                 </p>
               </>
             ) : null}
@@ -494,10 +579,10 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       {/* ── Bottom hint bar ─────────────────────────────────────── */}
       <footer className="flex shrink-0 items-center justify-between border-t border-black/10 px-4 py-1.5">
         <p className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-wire-mute/70">
-          select a module · inspect a payload · pause the flow · trace one step
+          drag a building to rearrange · click to inspect · pause the flow · trace one step
         </p>
         <p className="hidden font-mono text-[9.5px] uppercase tracking-[0.18em] text-wire-mute/50 sm:block">
-          drag to pan · scroll to zoom
+          drag empty grid to pan · scroll to zoom
         </p>
       </footer>
     </div>
