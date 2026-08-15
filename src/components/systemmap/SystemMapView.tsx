@@ -65,6 +65,34 @@ function FileChip({ name }: { name: string }) {
   );
 }
 
+function isDroppedConnection(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const m = err.message.toLowerCase();
+  return (
+    m === "failed to fetch" ||
+    m.includes("networkerror") ||
+    m.includes("load failed") ||
+    m.includes("aborted") ||
+    m.includes("network request failed")
+  );
+}
+
+async function readMapResponse(res: Response): Promise<{
+  spec?: SystemMapSpec;
+  detail?: string;
+  building?: boolean;
+}> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as { spec?: SystemMapSpec; detail?: string; building?: boolean };
+  } catch {
+    if (res.status === 504 || res.status === 524 || res.status === 502) {
+      throw new Error("Map generation timed out. Retrying…");
+    }
+    throw new Error(`Map generation failed (${res.status || "network"})`);
+  }
+}
+
 export function SystemMapView({ owner, repo }: { owner: string; repo: string }) {
   const { isAuthenticated } = useConvexAuth();
   const saved = useQuery(
@@ -178,23 +206,40 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       const graphUrl = savedGraph?.graphUrl || example?.graphUrl || null;
       // Retry loop: the backend may still be building the code graph.
       for (let attempt = 0; attempt < 30; attempt++) {
-        const res = await fetch("/api/map", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ owner, repo, graph_url: graphUrl }),
-        });
+        let res: Response;
+        try {
+          res = await fetch("/api/map", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ owner, repo, graph_url: graphUrl }),
+          });
+        } catch (err) {
+          if (isDroppedConnection(err) && attempt < 12) {
+            setGenStatus("Reconnecting");
+            setGenNote("The generator dropped the connection. Retrying…");
+            await new Promise((r) => setTimeout(r, 4000));
+            continue;
+          }
+          throw new Error(
+            "The connection dropped while generating the map. Large repositories can take a few minutes — click Retry.",
+          );
+        }
         if (res.status === 202) {
           setGenStatus("Building code graph");
           setGenNote("This can take a few minutes for large repositories.");
           await new Promise((r) => setTimeout(r, 12_000));
           continue;
         }
-        const data = (await res.json()) as {
-          spec?: SystemMapSpec;
-          detail?: string;
-        };
+        const data = await readMapResponse(res);
         if (!res.ok || !data.spec) {
-          throw new Error(data.detail || `Map generation failed (${res.status})`);
+          const detail = data.detail || `Map generation failed (${res.status})`;
+          if (/timed out|timeout/i.test(detail) && attempt < 12) {
+            setGenStatus("Retrying generator");
+            setGenNote(detail);
+            await new Promise((r) => setTimeout(r, 4000));
+            continue;
+          }
+          throw new Error(detail);
         }
         setGenStatus("Saving map");
         setGenNote(undefined);

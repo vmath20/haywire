@@ -61,9 +61,17 @@ function backendBase(req: NextRequest): string {
   return `${req.nextUrl.origin}${apiUrl("").replace(/\/$/, "")}`;
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+async function fetchJson<T>(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = 20_000,
+): Promise<T | null> {
   try {
-    const res = await fetch(url, { cache: "no-store", ...init });
+    const res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+      ...init,
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -71,14 +79,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> 
   }
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /**
- * Load the repo graph: explicit URL → backend disk cache → fresh analyze
- * build polled within the request budget. Returns null when the build is
- * still running (caller responds 202 so the client can retry).
+ * Load the repo graph: explicit URL → backend disk cache → kick off a fresh
+ * analyze job. Never block this request waiting for a long clone — the client
+ * already polls /api/map and a 202 tells it to come back.
  */
 async function loadGraph(
   req: NextRequest,
@@ -87,12 +91,12 @@ async function loadGraph(
   graphUrl?: string | null,
 ): Promise<AnalyzeResult | null | "building"> {
   if (graphUrl) {
-    const fromUrl = await fetchJson<AnalyzeResult>(graphUrl);
+    const fromUrl = await fetchJson<AnalyzeResult>(graphUrl, undefined, 45_000);
     if (fromUrl?.graph?.nodes?.length) return fromUrl;
   }
 
   const base = backendBase(req);
-  const cached = await fetchJson<AnalyzeResult>(`${base}/graph/${owner}/${repo}`);
+  const cached = await fetchJson<AnalyzeResult>(`${base}/graph/${owner}/${repo}`, undefined, 45_000);
   if (cached?.graph?.nodes?.length) return cached;
 
   const started = await fetchJson<{ job_id?: string }>(`${base}/analyze`, {
@@ -102,24 +106,27 @@ async function loadGraph(
   });
   if (!started?.job_id) return null;
 
-  const deadline = Date.now() + 220_000;
-  while (Date.now() < deadline) {
-    await sleep(3000);
-    const job = await fetchJson<{ status?: string; error?: { message?: string } | null }>(
-      `${base}/jobs/${started.job_id}`,
-    );
-    if (!job) continue;
-    if (job.status === "error") {
-      throw new Error(job.error?.message || `Graph build failed for ${owner}/${repo}`);
-    }
-    if (job.status === "done") {
-      const fromJob = await fetchJson<AnalyzeResult>(`${base}/jobs/${started.job_id}/graph`);
-      if (fromJob?.graph?.nodes?.length) return fromJob;
-      const fromCache = await fetchJson<AnalyzeResult>(`${base}/graph/${owner}/${repo}`);
-      if (fromCache?.graph?.nodes?.length) return fromCache;
-      return null;
-    }
+  const job = await fetchJson<{ status?: string; error?: { message?: string } | null }>(
+    `${base}/jobs/${started.job_id}`,
+  );
+  if (job?.status === "error") {
+    throw new Error(job.error?.message || `Graph build failed for ${owner}/${repo}`);
   }
+  if (job?.status === "done") {
+    const fromJob = await fetchJson<AnalyzeResult>(
+      `${base}/jobs/${started.job_id}/graph`,
+      undefined,
+      45_000,
+    );
+    if (fromJob?.graph?.nodes?.length) return fromJob;
+    const fromCache = await fetchJson<AnalyzeResult>(
+      `${base}/graph/${owner}/${repo}`,
+      undefined,
+      45_000,
+    );
+    if (fromCache?.graph?.nodes?.length) return fromCache;
+  }
+
   return "building";
 }
 
@@ -339,6 +346,7 @@ export async function POST(req: NextRequest) {
           response_format: { type: "json_object" },
           reasoning: { exclude: true },
         }),
+        signal: AbortSignal.timeout(90_000),
       });
 
       if (!res.ok) {
@@ -371,9 +379,15 @@ export async function POST(req: NextRequest) {
 
       return json({ spec, total_tokens: data.usage?.total_tokens ?? 0 });
     } catch (err) {
-      lastError = err instanceof Error ? err.message : "OpenRouter request failed";
+      const name = err instanceof Error ? err.name : "";
+      const msg = err instanceof Error ? err.message : "OpenRouter request failed";
+      lastError =
+        name === "TimeoutError" || /timeout|aborted/i.test(msg)
+          ? "Model timed out"
+          : msg;
     }
   }
 
-  return json({ detail: lastError || "Map generation failed" }, 502);
+  const timedOut = /timed out|timeout/i.test(lastError);
+  return json({ detail: lastError || "Map generation failed" }, timedOut ? 504 : 502);
 }
