@@ -33,40 +33,209 @@ function centerOf(m: MapModule): Pt {
   return iso(m.x + m.size / 2, m.y + m.size / 2);
 }
 
-/** Front-center dock, half a cell into the street (toward the camera). */
-function dockOf(m: MapModule): GPt {
-  return { gx: m.x + m.size / 2, gy: m.y + m.size + 0.4 };
+type Cell = { x: number; y: number };
+
+function cellKey(c: Cell): string {
+  return `${c.x},${c.y}`;
 }
 
-function occupiedSet(modules: MapModule[], exceptId?: string): Set<string> {
+function occupiedSet(modules: MapModule[]): Set<string> {
   const s = new Set<string>();
   for (const m of modules) {
-    if (m.id === exceptId) continue;
     for (let dx = 0; dx < m.size; dx++) {
       for (let dy = 0; dy < m.size; dy++) {
-        s.add(`${Math.round(m.x + dx)},${Math.round(m.y + dy)}`);
+        s.add(`${m.x + dx},${m.y + dy}`);
       }
     }
   }
   return s;
 }
 
-function samplesClear(a: GPt, b: GPt, occ: Set<string>): boolean {
-  const steps = Math.max(2, Math.ceil(Math.abs(a.gx - b.gx) + Math.abs(a.gy - b.gy)) * 2);
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const gx = a.gx + (b.gx - a.gx) * t;
-    const gy = a.gy + (b.gy - a.gy) * t;
-    if (occ.has(`${Math.floor(gx)},${Math.floor(gy)}`)) return false;
-  }
-  return true;
+function inStreetBounds(x: number, y: number): boolean {
+  // One-cell halo around the map so edge buildings always have a dock,
+  // then drawing clamps those cells back onto the visible grid.
+  return x >= -1 && y >= -1 && x <= MAP_GRID_W && y <= MAP_GRID_H;
 }
 
-function polylineClear(pts: GPt[], occ: Set<string>): boolean {
-  for (let i = 0; i < pts.length - 1; i++) {
-    if (!samplesClear(pts[i]!, pts[i + 1]!, occ)) return false;
+function streetNeighbors(c: Cell): Cell[] {
+  return [
+    { x: c.x + 1, y: c.y },
+    { x: c.x - 1, y: c.y },
+    { x: c.x, y: c.y + 1 },
+    { x: c.x, y: c.y - 1 },
+  ].filter((n) => inStreetBounds(n.x, n.y));
+}
+
+function footprintCells(m: MapModule): Cell[] {
+  const out: Cell[] = [];
+  for (let dx = 0; dx < m.size; dx++) {
+    for (let dy = 0; dy < m.size; dy++) {
+      out.push({ x: m.x + dx, y: m.y + dy });
+    }
   }
-  return true;
+  return out;
+}
+
+/** Unoccupied cells that share an edge with the building. */
+function dockCells(m: MapModule, occ: Set<string>): Cell[] {
+  const docks: Cell[] = [];
+  const seen = new Set<string>();
+  for (const c of footprintCells(m)) {
+    for (const n of streetNeighbors(c)) {
+      if (occ.has(cellKey(n))) continue;
+      const k = cellKey(n);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      docks.push(n);
+    }
+  }
+  if (docks.length > 0) return docks;
+  // Fully boxed-in: nearest unoccupied cell anywhere on the street grid.
+  const cx = m.x + (m.size - 1) / 2;
+  const cy = m.y + (m.size - 1) / 2;
+  let best: Cell | null = null;
+  let bestD = Infinity;
+  for (let x = -1; x <= MAP_GRID_W; x++) {
+    for (let y = -1; y <= MAP_GRID_H; y++) {
+      if (occ.has(`${x},${y}`)) continue;
+      const d = Math.abs(x - cx) + Math.abs(y - cy);
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best ? [best] : [{ x: m.x, y: m.y }];
+}
+
+function closestDock(m: MapModule, toward: MapModule, occ: Set<string>): Cell {
+  const tx = toward.x + toward.size / 2;
+  const ty = toward.y + toward.size / 2;
+  const docks = dockCells(m, occ);
+  let best = docks[0]!;
+  let bestD = Infinity;
+  for (const d of docks) {
+    const dist = Math.abs(d.x + 0.5 - tx) + Math.abs(d.y + 0.5 - ty);
+    if (dist < bestD) {
+      bestD = dist;
+      best = d;
+    }
+  }
+  return best;
+}
+
+/** Point on the building's outline, plugged into the chosen street cell. */
+function facePoint(m: MapModule, dock: Cell): GPt {
+  if (dock.y >= m.y + m.size) return { gx: m.x + m.size / 2, gy: m.y + m.size };
+  if (dock.y + 1 <= m.y) return { gx: m.x + m.size / 2, gy: m.y };
+  if (dock.x >= m.x + m.size) return { gx: m.x + m.size, gy: m.y + m.size / 2 };
+  if (dock.x + 1 <= m.x) return { gx: m.x, gy: m.y + m.size / 2 };
+  return { gx: m.x + m.size / 2, gy: m.y + m.size / 2 };
+}
+
+function cellCenter(c: Cell): GPt {
+  return {
+    gx: Math.min(MAP_GRID_W - 0.5, Math.max(0.5, c.x + 0.5)),
+    gy: Math.min(MAP_GRID_H - 0.5, Math.max(0.5, c.y + 0.5)),
+  };
+}
+
+function manhattan(a: Cell, b: Cell): number {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+/** 4-connected A* on street cells. Start/goal are always walkable. */
+function astar(start: Cell, goal: Cell, occ: Set<string>): Cell[] {
+  const sk = cellKey(start);
+  const gk = cellKey(goal);
+  if (sk === gk) return [start];
+
+  const walkable = (c: Cell) => {
+    if (!inStreetBounds(c.x, c.y)) return false;
+    const k = cellKey(c);
+    if (k === sk || k === gk) return true;
+    return !occ.has(k);
+  };
+
+  const open: Cell[] = [start];
+  const came = new Map<string, string>();
+  const gScore = new Map<string, number>([[sk, 0]]);
+  const fScore = new Map<string, number>([[sk, manhattan(start, goal)]]);
+  const inOpen = new Set<string>([sk]);
+  const cellOf = new Map<string, Cell>([[sk, start]]);
+
+  while (open.length) {
+    let bestI = 0;
+    let bestF = fScore.get(cellKey(open[0]!)) ?? 1e9;
+    for (let i = 1; i < open.length; i++) {
+      const f = fScore.get(cellKey(open[i]!)) ?? 1e9;
+      if (f < bestF) {
+        bestF = f;
+        bestI = i;
+      }
+    }
+    const current = open.splice(bestI, 1)[0]!;
+    const ck = cellKey(current);
+    inOpen.delete(ck);
+    cellOf.set(ck, current);
+
+    if (ck === gk) {
+      const path: Cell[] = [current];
+      let k = ck;
+      while (came.has(k)) {
+        k = came.get(k)!;
+        path.push(cellOf.get(k) ?? parseCell(k));
+      }
+      return path.reverse();
+    }
+
+    for (const n of streetNeighbors(current)) {
+      if (!walkable(n)) continue;
+      const nk = cellKey(n);
+      const tentative = (gScore.get(ck) ?? 1e9) + 1;
+      if (tentative >= (gScore.get(nk) ?? 1e9)) continue;
+      came.set(nk, ck);
+      cellOf.set(nk, n);
+      gScore.set(nk, tentative);
+      fScore.set(nk, tentative + manhattan(n, goal));
+      if (!inOpen.has(nk)) {
+        open.push(n);
+        inOpen.add(nk);
+      }
+    }
+  }
+
+  // No street path (rare): axis-aligned fallback still clamped on-grid.
+  return [start, { x: goal.x, y: start.y }, goal];
+}
+
+function parseCell(k: string): Cell {
+  const [x, y] = k.split(",").map(Number);
+  return { x: x ?? 0, y: y ?? 0 };
+}
+
+function samePoint(a: GPt, b: GPt): boolean {
+  return Math.abs(a.gx - b.gx) < 0.01 && Math.abs(a.gy - b.gy) < 0.01;
+}
+
+function compress(pts: GPt[]): GPt[] {
+  const out: GPt[] = [];
+  for (const p of pts) {
+    const prev = out[out.length - 1];
+    if (prev && samePoint(prev, p)) continue;
+    const a = out[out.length - 2];
+    if (
+      a &&
+      prev &&
+      ((Math.abs(a.gx - prev.gx) < 0.01 && Math.abs(prev.gx - p.gx) < 0.01) ||
+        (Math.abs(a.gy - prev.gy) < 0.01 && Math.abs(prev.gy - p.gy) < 0.01))
+    ) {
+      out[out.length - 1] = p;
+      continue;
+    }
+    out.push(p);
+  }
+  return out;
 }
 
 function toSvg(pts: GPt[]): string {
@@ -86,26 +255,19 @@ function routeLength(pts: GPt[]): number {
   return n;
 }
 
-/** Manhattan street route that prefers corridors around building footprints. */
+/**
+ * Continuous street route: face of A → dock → A* along free cells → dock → face of B.
+ * Always on-grid, always plugged into both buildings.
+ */
 function routeStreet(a: MapModule, b: MapModule, occ: Set<string>): GPt[] {
-  const s = dockOf(a);
-  const e = dockOf(b);
-  const frontY = Math.max(s.gy, e.gy) + 0.7;
-  const backY = Math.min(a.y, b.y) - 0.5;
-  const leftX = Math.min(s.gx, e.gx) - 0.7;
-  const rightX = Math.max(s.gx, e.gx) + 0.7;
-  const candidates: GPt[][] = [
-    [s, { gx: e.gx, gy: s.gy }, e],
-    [s, { gx: s.gx, gy: e.gy }, e],
-    [s, { gx: s.gx, gy: frontY }, { gx: e.gx, gy: frontY }, e],
-    [s, { gx: s.gx, gy: backY }, { gx: e.gx, gy: backY }, e],
-    [s, { gx: leftX, gy: s.gy }, { gx: leftX, gy: e.gy }, e],
-    [s, { gx: rightX, gy: s.gy }, { gx: rightX, gy: e.gy }, e],
-  ];
-  for (const pts of candidates) {
-    if (polylineClear(pts, occ)) return pts;
-  }
-  return [s, { gx: s.gx, gy: frontY }, { gx: e.gx, gy: frontY }, e];
+  const da = closestDock(a, b, occ);
+  const db = closestDock(b, a, occ);
+  const cells = astar(da, db, occ);
+  const pts: GPt[] = [facePoint(a, da)];
+  for (const c of cells) pts.push(cellCenter(c));
+  pts.push(facePoint(b, db));
+  const clean = compress(pts);
+  return clean.length >= 2 ? clean : [facePoint(a, da), facePoint(b, db)];
 }
 
 function pointAlong(pts: GPt[], t: number): GPt {
@@ -431,17 +593,15 @@ export function IsoScene({
   const occ = useMemo(() => occupiedSet(modules), [modules]);
 
   const faintRoutes = useMemo(() => {
-    const out: { d: string; depth: number }[] = [];
+    const out: { d: string; key: string }[] = [];
     for (const f of flows) {
       if (activeFlow && f.id === activeFlow.id) continue;
-      for (const s of f.steps) {
+      f.steps.forEach((s, i) => {
         const a = byId.get(s.from);
         const b = byId.get(s.to);
-        if (!a || !b) continue;
-        const pts = routeStreet(a, b, occ);
-        const mid = pts[Math.floor(pts.length / 2)]!;
-        out.push({ d: toSvg(pts), depth: mid.gx + mid.gy });
-      }
+        if (!a || !b) return;
+        out.push({ d: toSvg(routeStreet(a, b, occ)), key: `${f.id}-${i}` });
+      });
     }
     return out;
   }, [flows, activeFlow, byId, occ]);
@@ -470,13 +630,26 @@ export function IsoScene({
 
   const motionPts = useMemo(() => {
     const pts: GPt[] = [];
-    for (const r of activeRoutes) {
-      if (pts.length > 0) pts.pop();
-      pts.push(...r.pts);
+    for (let i = 0; i < activeRoutes.length; i++) {
+      const r = activeRoutes[i]!;
+      if (pts.length > 0 && r.pts.length > 0) {
+        const last = pts[pts.length - 1]!;
+        const next = r.pts[0]!;
+        if (!samePoint(last, next)) {
+          const shared = byId.get(activeFlow?.steps[i]?.from ?? "");
+          if (shared) {
+            pts.push({ gx: shared.x + shared.size / 2, gy: shared.y + shared.size / 2 });
+          }
+        }
+      }
+      const skipFirst =
+        pts.length > 0 && r.pts.length > 0 && samePoint(pts[pts.length - 1]!, r.pts[0]!);
+      for (let j = skipFirst ? 1 : 0; j < r.pts.length; j++) pts.push(r.pts[j]!);
     }
-    const len = routeLength(pts);
-    return pts.length >= 2 ? { pts, len, dur: Math.max(5, len * 0.85) } : null;
-  }, [activeRoutes]);
+    const clean = compress(pts);
+    const len = routeLength(clean);
+    return clean.length >= 2 ? { pts: clean, len, dur: Math.max(5, len * 0.85) } : null;
+  }, [activeRoutes, activeFlow, byId]);
 
   useEffect(() => {
     if (!motionPts || paused) return;
@@ -496,7 +669,7 @@ export function IsoScene({
       const t = (clock / motionPts.dur + i / 3) % 1;
       const g = pointAlong(motionPts.pts, t);
       const s = iso(g.gx, g.gy);
-      return { x: s.x, y: s.y, depth: g.gx + g.gy };
+      return { x: s.x, y: s.y, key: `d-${i}` };
     });
   }, [motionPts, paused, clock]);
 
@@ -535,34 +708,30 @@ export function IsoScene({
     onSelect(id);
   }
 
-  type DrawItem =
-    | { kind: "faint"; depth: number; d: string; key: string }
-    | { kind: "active"; depth: number; d: string; style: (typeof KIND_STYLE)[string]; key: string }
-    | { kind: "trace"; depth: number; d: string }
-    | { kind: "building"; depth: number; m: MapModule }
-    | { kind: "dot"; depth: number; x: number; y: number; key: string };
+  const orderedBuildings = useMemo(
+    () =>
+      [...modules]
+        .map((m) => ({ depth: m.x + m.y + m.size, m }))
+        .sort((a, b) => a.depth - b.depth),
+    [modules],
+  );
 
-  const drawItems = useMemo(() => {
-    const items: DrawItem[] = [];
-    faintRoutes.forEach((r, i) => {
-      items.push({ kind: "faint", depth: r.depth, d: r.d, key: `f-${i}` });
-    });
+  const ports = useMemo(() => {
+    const out: { x: number; y: number; key: string }[] = [];
+    const seen = new Set<string>();
     for (const r of activeRoutes) {
-      const style = KIND_STYLE[r.kind] ?? KIND_STYLE.flow!;
-      items.push({ kind: "active", depth: r.depth, d: r.d, style, key: `a-${r.i}` });
+      const ends = [r.pts[0], r.pts[r.pts.length - 1]];
+      for (const p of ends) {
+        if (!p) continue;
+        const k = `${p.gx.toFixed(2)},${p.gy.toFixed(2)}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const s = iso(p.gx, p.gy);
+        out.push({ x: s.x, y: s.y, key: k });
+      }
     }
-    if (traced) {
-      items.push({ kind: "trace", depth: traced.depth + 0.2, d: traced.d });
-    }
-    for (const m of modules) {
-      items.push({ kind: "building", depth: m.x + m.y + m.size, m });
-    }
-    payloads.forEach((p, i) => {
-      items.push({ kind: "dot", depth: p.depth + 0.15, x: p.x, y: p.y, key: `d-${i}` });
-    });
-    items.sort((a, b) => a.depth - b.depth);
-    return items;
-  }, [faintRoutes, activeRoutes, traced, modules, payloads]);
+    return out;
+  }, [activeRoutes]);
 
   return (
     <svg
@@ -657,54 +826,21 @@ export function IsoScene({
           ))}
         </g>
 
-        {drawItems.map((item) => {
-          if (item.kind === "faint") {
-            return (
-              <path
-                key={item.key}
-                d={item.d}
-                fill="none"
-                stroke="#d5dbe3"
-                strokeWidth={1.1}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            );
-          }
-          if (item.kind === "active") {
-            return (
-              <path
-                key={item.key}
-                d={item.d}
-                fill="none"
-                stroke={item.style.stroke}
-                strokeWidth={item.style.width}
-                strokeDasharray={item.style.dash}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            );
-          }
-          if (item.kind === "trace") {
-            return (
-              <path
-                key="trace"
-                d={item.d}
-                fill="none"
-                stroke="#0b0d10"
-                strokeWidth={2.4}
-                strokeLinecap="round"
-                opacity={0.85}
-              />
-            );
-          }
-          if (item.kind === "dot") {
-            return (
-              <g key={item.key}>
-                <circle cx={item.x} cy={item.y} r={4.4} fill="#8fd414" stroke="#ffffff" strokeWidth={1.5} />
-              </g>
-            );
-          }
+        <g style={{ pointerEvents: "none" }}>
+          {faintRoutes.map((r) => (
+            <path
+              key={r.key}
+              d={r.d}
+              fill="none"
+              stroke="#d5dbe3"
+              strokeWidth={1.2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+        </g>
+
+        {orderedBuildings.map((item) => {
           const pal = paletteForCategory(item.m.category, categories);
           const palIndex = Math.max(0, categories.findIndex((c) => c.id === item.m.category));
           return (
@@ -756,6 +892,58 @@ export function IsoScene({
               </g>
             );
           })}
+        </g>
+
+        {/* Active flow on top: one continuous street path, always plugged in */}
+        <g style={{ pointerEvents: "none" }}>
+          {activeRoutes.map((r) => {
+            const style = KIND_STYLE[r.kind] ?? KIND_STYLE.flow!;
+            return (
+              <path
+                key={`a-${r.i}`}
+                d={r.d}
+                fill="none"
+                stroke={style.stroke}
+                strokeWidth={style.width}
+                strokeDasharray={style.dash}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            );
+          })}
+          {traced ? (
+            <path
+              d={traced.d}
+              fill="none"
+              stroke="#0b0d10"
+              strokeWidth={2.4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.85}
+            />
+          ) : null}
+          {ports.map((p) => (
+            <circle
+              key={p.key}
+              cx={p.x}
+              cy={p.y}
+              r={2.4}
+              fill="#8fd414"
+              stroke="#0b0d10"
+              strokeWidth={0.8}
+            />
+          ))}
+          {payloads.map((p) => (
+            <circle
+              key={p.key}
+              cx={p.x}
+              cy={p.y}
+              r={4.2}
+              fill="#8fd414"
+              stroke="#ffffff"
+              strokeWidth={1.5}
+            />
+          ))}
         </g>
 
         {traced ? (
