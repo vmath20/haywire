@@ -34,27 +34,19 @@ const GEN_PHRASES = [
 function GeneratingScreen({
   status,
   note,
-  logs,
 }: {
   status: string;
   note?: string;
-  logs?: string[];
 }) {
   const [phrase, setPhrase] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setPhrase((p) => (p + 1) % GEN_PHRASES.length), 2600);
     return () => clearInterval(t);
   }, []);
-  const recent = (logs ?? []).slice(-6);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 bg-white px-6">
       <LoadingState label={status} />
       <p className="text-xs text-wire-mute">{note || GEN_PHRASES[phrase]}</p>
-      {recent.length > 0 ? (
-        <pre className="max-h-40 w-full max-w-lg overflow-y-auto rounded-md border border-black/10 bg-[#fafafa] px-3 py-2 font-mono text-[10px] leading-relaxed text-wire-mute">
-          {recent.join("\n")}
-        </pre>
-      ) : null}
     </div>
   );
 }
@@ -195,7 +187,6 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
   const [generating, setGenerating] = useState(false);
   const [genStatus, setGenStatus] = useState("Analyzing repository");
   const [genNote, setGenNote] = useState<string | undefined>(undefined);
-  const [genLogs, setGenLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
@@ -288,14 +279,8 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     setError(null);
     setGenStatus("Analyzing repository");
     setGenNote(undefined);
-    setGenLogs([]);
-    const logs: string[] = [];
     const pushLog = (message: string) => {
-      const line = `${new Date().toISOString().slice(11, 19)} ${message}`;
-      logs.push(line);
       console.info("[map]", message);
-      setGenLogs([...logs]);
-      setGenNote(message);
     };
     try {
       const graphUrl = savedGraph?.graphUrl || example?.graphUrl || null;
@@ -322,9 +307,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
             await new Promise((r) => setTimeout(r, 4000));
             continue;
           }
-          throw new Error(
-            `Could not reach /api/map (${msg}). See the log below and the browser console ([map]).`,
-          );
+          throw new Error(`Could not reach the map service (${msg}).`);
         }
 
         const ev = await consumeMapStream(res, (event) => {
@@ -386,7 +369,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
     } catch (err) {
       const message = err instanceof Error ? err.message : "Map generation failed";
       pushLog(`Failed: ${message}`);
-      setError(`${message}\n\n${logs.slice(-12).join("\n")}`);
+      setError(message);
     } finally {
       setGenerating(false);
     }
@@ -419,7 +402,7 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
         <p className="font-mono text-[12px] uppercase tracking-[0.22em] text-wire-ember">
           Map generation failed
         </p>
-        <p className="max-w-lg whitespace-pre-wrap text-left text-sm leading-relaxed text-wire-mute">
+        <p className="max-w-md text-center text-sm leading-relaxed text-wire-mute">
           {error}
         </p>
         <button
@@ -441,7 +424,6 @@ export function SystemMapView({ owner, repo }: { owner: string; repo: string }) 
       <GeneratingScreen
         status={generating ? genStatus : "Loading map"}
         note={generating ? genNote : undefined}
-        logs={generating ? genLogs : undefined}
       />
     );
   }
