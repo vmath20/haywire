@@ -69,6 +69,12 @@ export function HomeHero() {
             Paste a GitHub repo. Haywire turns it into a live knowledge graph of the
             code — and an isometric map of how the system is wired.
           </p>
+          <a
+            href="#graph-and-map"
+            className="animate-fade-up mt-5 inline-flex text-sm font-semibold text-wire-ink underline decoration-wire-signal decoration-2 underline-offset-4 transition hover:decoration-wire-ember [animation-delay:220ms]"
+          >
+            See how it works
+          </a>
 
           <form
             onSubmit={onSubmit}
