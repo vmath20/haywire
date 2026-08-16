@@ -70,7 +70,7 @@ export function HomeHero() {
             every symbol, call, and hub in the source.
           </p>
           <a
-            href="#graph"
+            href="#how"
             className="animate-fade-up mt-5 inline-flex text-sm font-semibold text-wire-ink underline decoration-wire-signal decoration-2 underline-offset-4 transition hover:decoration-wire-ember [animation-delay:220ms]"
           >
             See how it works
