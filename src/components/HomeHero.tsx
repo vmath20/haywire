@@ -66,11 +66,11 @@ export function HomeHero() {
           </h1>
 
           <p className="animate-fade-up mt-6 max-w-lg text-lg leading-snug text-wire-mute sm:text-xl [animation-delay:180ms]">
-            Paste a GitHub repo. Haywire turns it into a live knowledge graph of the
-            code — and an isometric map of how the system is wired.
+            Paste a GitHub repo. Haywire turns it into a live knowledge graph of
+            every symbol, call, and hub in the source.
           </p>
           <a
-            href="#graph-and-map"
+            href="#graph"
             className="animate-fade-up mt-5 inline-flex text-sm font-semibold text-wire-ink underline decoration-wire-signal decoration-2 underline-offset-4 transition hover:decoration-wire-ember [animation-delay:220ms]"
           >
             See how it works

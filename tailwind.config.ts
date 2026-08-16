@@ -32,6 +32,8 @@ const config: Config = {
         "brand-in": "brandIn 1.1s cubic-bezier(0.16, 1, 0.3, 1) both",
         "signal-pulse": "signalPulse 2.8s ease-in-out infinite",
         "drift": "drift 18s linear infinite",
+        "dash-flow": "dashFlow 1.2s linear infinite",
+        "node-pulse": "nodePulse 2s ease-in-out infinite",
       },
       keyframes: {
         fadeUp: {
@@ -53,6 +55,14 @@ const config: Config = {
         drift: {
           "0%": { transform: "translate3d(0,0,0)" },
           "100%": { transform: "translate3d(-4%, 3%, 0)" },
+        },
+        dashFlow: {
+          "0%": { strokeDashoffset: "24" },
+          "100%": { strokeDashoffset: "0" },
+        },
+        nodePulse: {
+          "0%, 100%": { opacity: "0.35", transform: "scale(1)" },
+          "50%": { opacity: "0.9", transform: "scale(1.08)" },
         },
       },
     },

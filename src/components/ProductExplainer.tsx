@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ArrowUpRight, Github } from "lucide-react";
+import clsx from "clsx";
 
 type DemoNode = {
   id: string;
@@ -41,109 +42,12 @@ const GRAPH_EDGES: DemoEdge[] = [
 ];
 
 const COMMUNITY_NAME = ["UI", "Data", "Auth"] as const;
-
-type MapBuilding = {
-  id: string;
-  code: string;
-  name: string;
-  what: string;
-  files: string[];
-  category: string;
-  x: number;
-  y: number;
-  size: number;
-  stack: number;
-};
-
-type MapFlow = { from: string; to: string; payload: string };
-
-const MAP_CATEGORIES = [
-  { id: "ui", label: "Interface" },
-  { id: "core", label: "Runtime" },
-  { id: "data", label: "Storage" },
-] as const;
-
-const MAP_BUILDINGS: MapBuilding[] = [
-  {
-    id: "inbox",
-    code: "IN",
-    name: "Inbox UI",
-    what: "Screens that list threads and compose mail.",
-    files: ["src/app/inbox/", "src/components/"],
-    category: "ui",
-    x: 1,
-    y: 2,
-    size: 2,
-    stack: 3,
-  },
-  {
-    id: "agent",
-    code: "AG",
-    name: "Agent",
-    what: "Turns a user request into tool calls and a reply.",
-    files: ["src/lib/agent.ts"],
-    category: "core",
-    x: 5,
-    y: 2,
-    size: 2,
-    stack: 5,
-  },
-  {
-    id: "tools",
-    code: "TL",
-    name: "Tools",
-    what: "Send, search, and label mail on behalf of the agent.",
-    files: ["src/lib/send.ts", "src/lib/inbox.ts"],
-    category: "core",
-    x: 9,
-    y: 2,
-    size: 2,
-    stack: 3,
-  },
-  {
-    id: "auth",
-    code: "AU",
-    name: "Auth",
-    what: "Gates every request to the signed-in user.",
-    files: ["src/lib/auth.ts"],
-    category: "ui",
-    x: 1,
-    y: 6,
-    size: 2,
-    stack: 2,
-  },
-  {
-    id: "store",
-    code: "DB",
-    name: "Store",
-    what: "Persists threads, messages, and agent traces.",
-    files: ["src/lib/store.ts"],
-    category: "data",
-    x: 5,
-    y: 6,
-    size: 2,
-    stack: 2,
-  },
-];
-
-const MAP_FLOWS: MapFlow[] = [
-  { from: "inbox", to: "agent", payload: "UserPrompt" },
-  { from: "agent", to: "tools", payload: "ToolCall" },
-  { from: "tools", to: "store", payload: "Message" },
-  { from: "inbox", to: "auth", payload: "Session" },
-  { from: "agent", to: "store", payload: "Trace" },
-];
-
-const MAP_PALETTES = [
-  { top: "#f7ffe3", left: "#e7f3c2", right: "#d3e3a4" },
-  { top: "#eef3ff", left: "#dfe7f5", right: "#d0dbeb" },
-  { top: "#fff6ea", left: "#f3e6d4", right: "#e8d5bc" },
-] as const;
+const NODE_IDS = GRAPH_NODES.map((n) => n.id);
 
 const WHY = [
   {
     title: "Blast radius, not grep.",
-    body: "A search finds a name. A graph finds every path that can reach it — including the callers named something else. Rename fetchInbox and see the three components that break before you touch a file.",
+    body: "A search finds a name. A graph finds every path that can reach it — including the callers named something else. Rename fetchInbox and see what actually breaks.",
     visual: "blast" as const,
   },
   {
@@ -152,9 +56,9 @@ const WHY = [
     visual: "community" as const,
   },
   {
-    title: "The tour a README can't give.",
-    body: "A map is how a new hire — or an agent — learns a repo in minutes: which modules own a flow, which buildings are load-bearing, which streets carry the real payload.",
-    visual: "map" as const,
+    title: "Follow the call path.",
+    body: "Click from a screen to a store in one hop sequence. Haywire traces the shortest path through real EXTRACTED edges, so you read the flow instead of guessing it.",
+    visual: "path" as const,
   },
   {
     title: "Proven edges vs guesses.",
@@ -163,7 +67,7 @@ const WHY = [
   },
   {
     title: "God nodes, in plain sight.",
-    body: "High-degree hubs light up. That's the file everyone is afraid to touch, visualized — the one change that ripples through the city.",
+    body: "High-degree hubs light up. That's the file everyone is afraid to touch, visualized — the one change that ripples through the graph.",
     visual: "hub" as const,
   },
   {
@@ -176,91 +80,104 @@ const WHY = [
 const STEPS = [
   {
     n: "01",
-    title: "Paste a repo",
-    body: "A GitHub URL or owner/repo. Public source is enough — no IDE plugin, no local index to babysit.",
+    title: "Indexes your repo",
+    body: "Paste a GitHub URL. Haywire clones the source and lists every function, class, and module as a node — no IDE plugin, no local index to babysit.",
   },
   {
     n: "02",
-    title: "Read the AST",
-    body: "Tree-sitter walks the code. Functions, classes, modules, and calls become nodes and edges. No LLM inventing the graph.",
+    title: "Extracts the call graph",
+    body: "Tree-sitter walks the AST. Calls, imports, and writes become edges. Solid is proven. Dashed is inferred. No LLM inventing the wiring.",
   },
   {
     n: "03",
-    title: "Graph, then map",
-    body: "Explore the knowledge graph, or step back to the isometric city — same truth, two distances. Query it from the app or over MCP.",
+    title: "You (or an agent) query it",
+    body: "Explore communities and hubs in the app, or ask find_symbol / who_calls / trace_path over MCP so agents navigate instead of dumping files.",
   },
 ];
+
+const MCP_TOOLS = [
+  {
+    id: "find",
+    label: "find_symbol",
+    arg: '"fetchInbox"',
+    lines: [
+      { tone: "ok", text: "fetchInbox  ·  function  ·  src/lib/inbox.ts:42" },
+      { tone: "dim", text: "community  Data  ·  degree  4" },
+    ],
+  },
+  {
+    id: "calls",
+    label: "who_calls",
+    arg: '"fetchInbox"',
+    lines: [
+      { tone: "ok", text: "MessageList  ·  calls  ·  src/components/MessageList.tsx:88" },
+      { tone: "ok", text: "AuthGate  ·  scopes  ·  inferred" },
+      { tone: "dim", text: "2 callers  ·  0 files dumped" },
+    ],
+  },
+  {
+    id: "path",
+    label: "trace_path",
+    arg: '"InboxPage" → "ThreadStore"',
+    lines: [
+      { tone: "ok", text: "InboxPage  →  MessageList  →  fetchInbox  →  ThreadStore" },
+      { tone: "dim", text: "3 hops  ·  all EXTRACTED  ·  14ms" },
+    ],
+  },
+] as const;
 
 export function ProductExplainer() {
   return (
     <div className="relative z-10 bg-black text-white">
-      <section id="graph-and-map" className="scroll-mt-20 px-4 pt-24 sm:px-6 sm:pt-32">
+      <section id="graph" className="scroll-mt-20 px-4 pt-24 sm:px-6 sm:pt-32">
         <div className="mx-auto max-w-6xl">
-          <h2 className="max-w-3xl font-display text-[clamp(2.5rem,6vw,4.25rem)] font-semibold leading-[1.04] tracking-[-0.035em]">
-            Graph the code.
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-wire-signal">
+            Knowledge graph
+          </p>
+          <h2 className="mt-4 max-w-3xl font-display text-[clamp(2.5rem,6vw,4.25rem)] font-semibold leading-[1.04] tracking-[-0.035em]">
+            A graph of every
             <br />
-            Map the system.
+            symbol, call, and hub.
           </h2>
           <p className="mt-6 max-w-xl text-[17px] leading-[1.6] text-[#999]">
-            Haywire reads a GitHub repository and builds two views of the same
-            truth: a knowledge graph of every symbol and call, and an isometric
-            map of the subsystems those calls travel through. Click the toy
-            inbox below — a real repo works the same way.
+            Haywire reads a GitHub repository with tree-sitter and builds a live
+            knowledge graph: functions, classes, modules, and the edges that
+            actually connect them. Click a node in the toy inbox below — a real
+            repo works the same way.
           </p>
         </div>
       </section>
 
-      <section className="px-4 pt-14 pb-8 sm:px-6 sm:pt-16">
-        <div className="mx-auto grid max-w-6xl gap-3 lg:grid-cols-2">
-          <article className="flex min-h-[28rem] flex-col overflow-hidden rounded-[28px] bg-wire-signal p-3 sm:p-4">
+      <section className="px-4 pt-14 pb-4 sm:px-6 sm:pt-16">
+        <div className="mx-auto max-w-6xl">
+          <article className="overflow-hidden rounded-[28px] bg-wire-signal p-3 sm:p-4">
             <GraphDemo />
           </article>
-          <article className="flex min-h-[28rem] flex-col overflow-hidden rounded-[28px] bg-[#f3efe6] p-3 sm:p-4">
-            <MapDemo />
-          </article>
-        </div>
-        <div className="mx-auto mt-10 grid max-w-6xl gap-10 px-1 lg:grid-cols-2 lg:gap-16">
-          <div>
-            <h3 className="font-display text-2xl font-semibold tracking-[-0.03em] sm:text-[28px]">
-              Graph
-            </h3>
-            <p className="mt-3 text-[17px] leading-[1.6] text-[#999]">
-              Nodes are functions, classes, and modules. Solid edges are extracted
-              from the AST; dashed edges are inferred. Color is community — UI,
-              data, auth — so you see the architecture before you open a file.
-              Click a node to follow callers and callees.
-            </p>
-          </div>
-          <div>
-            <h3 className="font-display text-2xl font-semibold tracking-[-0.03em] sm:text-[28px]">
-              Map
-            </h3>
-            <p className="mt-3 text-[17px] leading-[1.6] text-[#999]">
-              Buildings are modules. Height is how much they do. Streets are real
-              control and data paths — the payload that actually moves, not a
-              guessed architecture diagram. Click a building to see what it owns
-              and what it sends.
-            </p>
-          </div>
+          <p className="mt-6 max-w-2xl text-[17px] leading-[1.6] text-[#999]">
+            Nodes are functions, classes, and modules. Solid edges are extracted
+            from the AST; dashed edges are inferred. The graph auto-walks the
+            toy inbox — click any node to take over.
+          </p>
         </div>
       </section>
 
-      <section id="why" className="scroll-mt-20 px-4 pt-24 pb-8 sm:px-6 sm:pt-36">
+      <HowItWorks />
+
+      <section id="why" className="scroll-mt-20 px-4 pt-8 pb-8 sm:px-6 sm:pt-16">
         <div className="mx-auto max-w-6xl">
           <h2 className="max-w-3xl font-display text-[clamp(2.5rem,6vw,4.25rem)] font-semibold leading-[1.04] tracking-[-0.035em]">
-            Why graphs
+            Why the graph
             <br />
-            and maps matter
+            is the product
           </h2>
           <p className="mt-6 max-w-xl text-[17px] leading-[1.6] text-[#999]">
-            Codebases hide structure in names, folders, and folklore. Graphs make
-            the wiring inspectable. Maps make the system legible. Together they
-            answer the questions grep never will.
+            Codebases hide structure in names, folders, and folklore. A graph
+            makes the wiring inspectable — the questions grep never answers.
           </p>
 
-          <div className="mt-14 grid grid-cols-1 gap-px overflow-hidden rounded-[24px] border border-white/10 bg-white/10 md:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-14 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {WHY.map((item) => (
-              <article key={item.title} className="flex flex-col bg-black p-6 sm:p-8">
+              <SpotlightCard key={item.title}>
                 <div className="relative aspect-[4/3] overflow-hidden rounded-[16px] bg-[#111113]">
                   <WhyVisual kind={item.visual} />
                 </div>
@@ -268,49 +185,28 @@ export function ProductExplainer() {
                   <span className="font-semibold text-white">{item.title} </span>
                   {item.body}
                 </p>
-              </article>
+              </SpotlightCard>
             ))}
           </div>
         </div>
       </section>
 
-      <section id="how" className="scroll-mt-20 px-4 py-24 sm:px-6 sm:py-32">
-        <div className="mx-auto max-w-6xl">
-          <h2 className="max-w-3xl font-display text-[clamp(2.5rem,6vw,4.25rem)] font-semibold leading-[1.04] tracking-[-0.035em]">
-            How it
-            <br />
-            actually works
-          </h2>
-          <div className="mt-16 grid gap-12 md:grid-cols-3 md:gap-8">
-            {STEPS.map((step) => (
-              <div key={step.n}>
-                <p className="font-display text-sm font-semibold tracking-[0.18em] text-wire-signal">
-                  {step.n}
-                </p>
-                <h3 className="mt-4 font-display text-2xl font-semibold tracking-[-0.03em]">
-                  {step.title}
-                </h3>
-                <p className="mt-3 text-[17px] leading-[1.6] text-[#999]">{step.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <QueryPlayground />
 
-      <section className="relative overflow-hidden px-4 pt-10 pb-28 text-center sm:px-6 sm:pb-36">
+      <section className="relative overflow-hidden px-4 pt-16 pb-28 text-center sm:px-6 sm:pb-36">
         <h2 className="font-display text-[clamp(2.75rem,7vw,5rem)] font-semibold leading-[1.02] tracking-[-0.04em]">
           See the wiring.
           <br />
           Then change it.
         </h2>
         <p className="mx-auto mt-5 max-w-md text-[17px] leading-[1.6] text-[#999]">
-          Paste a public GitHub repo and get a live graph and map — or star the
-          project and run it yourself.
+          Paste a public GitHub repo and get a live knowledge graph — or star
+          the project and run it yourself.
         </p>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/signin"
-            className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-white/90"
+            className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:scale-[1.03] hover:bg-white/90"
           >
             Graph a repo
             <ArrowUpRight className="h-4 w-4" />
@@ -319,7 +215,7 @@ export function ProductExplainer() {
             href="https://github.com/vmath20/haywire"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:scale-[1.03] hover:bg-white/10"
           >
             <Github className="h-4 w-4" />
             Star on GitHub
@@ -330,10 +226,55 @@ export function ProductExplainer() {
   );
 }
 
+function SpotlightCard({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+
+  function onMove(e: MouseEvent<HTMLElement>) {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty("--spot-x", `${e.clientX - r.left}px`);
+    el.style.setProperty("--spot-y", `${e.clientY - r.top}px`);
+  }
+
+  return (
+    <article
+      ref={ref}
+      onMouseMove={onMove}
+      className="group relative overflow-hidden rounded-[24px] border border-white/10 bg-[#0c0c0e] p-6 transition duration-300 hover:-translate-y-1 hover:border-wire-signal/40 sm:p-8"
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        style={{
+          background:
+            "radial-gradient(420px circle at var(--spot-x, 50%) var(--spot-y, 0%), rgba(184,255,60,0.14), transparent 42%)",
+        }}
+      />
+      <div className="relative">{children}</div>
+    </article>
+  );
+}
+
 function GraphDemo() {
   const [selected, setSelected] = useState<string>("list");
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [pinned, setPinned] = useState(false);
   const byId = useMemo(() => new Map(GRAPH_NODES.map((n) => [n.id, n])), []);
-  const node = byId.get(selected) ?? GRAPH_NODES[1]!;
+  const focusId = hovered ?? selected;
+  const node = byId.get(focusId) ?? GRAPH_NODES[1]!;
+
+  useEffect(() => {
+    if (pinned) return;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    const t = window.setInterval(() => {
+      setSelected((cur) => NODE_IDS[(NODE_IDS.indexOf(cur) + 1) % NODE_IDS.length]!);
+    }, 2400);
+    return () => window.clearInterval(t);
+  }, [pinned]);
 
   const related = GRAPH_EDGES.filter((e) => e.from === node.id || e.to === node.id);
   const lit = new Set<string>([node.id]);
@@ -342,11 +283,16 @@ function GraphDemo() {
     lit.add(e.to);
   }
 
+  function pick(id: string) {
+    setPinned(true);
+    setSelected(id);
+  }
+
   return (
-    <div className="flex h-full min-h-[24rem] flex-1 flex-col overflow-hidden rounded-[20px] bg-[#0b0d10]/[0.06]">
+    <div className="flex min-h-[26rem] flex-col overflow-hidden rounded-[20px] bg-[#0b0d10]/[0.07]">
       <svg
         viewBox="0 0 540 360"
-        className="h-[18rem] w-full flex-1 cursor-pointer sm:h-[22rem]"
+        className="h-[20rem] w-full flex-1 cursor-pointer sm:h-[26rem]"
         role="img"
         aria-label="Interactive knowledge graph of a toy inbox app. Click a node to inspect it."
       >
@@ -371,9 +317,13 @@ function GraphDemo() {
               x2={b.x}
               y2={b.y}
               stroke="#0b0d10"
-              strokeOpacity={active ? 0.9 : 0.22}
-              strokeWidth={active ? 2.2 : 1.2}
-              strokeDasharray={e.confidence === "INFERRED" ? "5 4" : undefined}
+              strokeOpacity={active ? 0.92 : 0.18}
+              strokeWidth={active ? 2.4 : 1.2}
+              strokeDasharray={e.confidence === "INFERRED" ? "5 4" : active ? "10 8" : undefined}
+              className={clsx(
+                "transition-[stroke-opacity,stroke-width] duration-500",
+                active && e.confidence === "EXTRACTED" && "animate-dash-flow",
+              )}
               markerEnd={active ? "url(#hw-arrow-lit)" : "url(#hw-arrow)"}
             />
           );
@@ -384,35 +334,46 @@ function GraphDemo() {
           return (
             <g
               key={n.id}
-              onClick={() => setSelected(n.id)}
+              onClick={() => pick(n.id)}
+              onMouseEnter={() => setHovered(n.id)}
+              onMouseLeave={() => setHovered(null)}
               className="cursor-pointer"
               role="button"
               tabIndex={0}
               onKeyDown={(ev) => {
                 if (ev.key === "Enter" || ev.key === " ") {
                   ev.preventDefault();
-                  setSelected(n.id);
+                  pick(n.id);
                 }
               }}
             >
               {isSel ? (
-                <circle cx={n.x} cy={n.y} r="22" fill="#0b0d10" fillOpacity="0.12" />
+                <circle
+                  cx={n.x}
+                  cy={n.y}
+                  r="26"
+                  fill="#0b0d10"
+                  fillOpacity="0.12"
+                  className="animate-node-pulse"
+                />
               ) : null}
               <circle
                 cx={n.x}
                 cy={n.y}
-                r={isSel ? 13 : 10}
+                r={isSel ? 14 : 10}
                 fill="#0b0d10"
-                opacity={isLit ? 1 : 0.32}
+                opacity={isLit ? 1 : 0.28}
+                className="transition-all duration-300"
               />
               <text
                 x={n.x}
-                y={n.y + 28}
+                y={n.y + 30}
                 textAnchor="middle"
                 fontSize="12"
                 fontWeight={isSel ? 700 : 500}
                 fill="#0b0d10"
-                opacity={isLit ? 1 : 0.4}
+                opacity={isLit ? 1 : 0.38}
+                className="transition-opacity duration-300"
               >
                 {n.label}
               </text>
@@ -421,11 +382,12 @@ function GraphDemo() {
         })}
       </svg>
 
-      <div className="m-2 mt-0 rounded-[16px] bg-black/90 px-4 py-3 text-white sm:px-5">
+      <div className="m-2 mt-0 rounded-[16px] bg-black px-4 py-3 text-white sm:px-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="font-display text-base font-semibold tracking-tight">{node.label}</p>
           <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/45">
             {COMMUNITY_NAME[node.community]} · {node.kind}
+            {pinned ? "" : " · auto"}
           </p>
         </div>
         <p className="mt-1 font-mono text-xs text-white/45">{node.file}</p>
@@ -438,8 +400,8 @@ function GraphDemo() {
               <li key={`${e.from}-${e.to}`}>
                 <button
                   type="button"
-                  onClick={() => setSelected(otherId)}
-                  className="underline decoration-wire-signal decoration-2 underline-offset-2 hover:decoration-white"
+                  onClick={() => pick(otherId)}
+                  className="underline decoration-wire-signal decoration-2 underline-offset-2 transition hover:decoration-white"
                 >
                   {dir} {other?.label}
                 </button>
@@ -453,215 +415,201 @@ function GraphDemo() {
   );
 }
 
-const HW = 28;
-const HH = 14;
-const LH = 8;
-const SLAB_GAP = 2;
+function HowItWorks() {
+  const [step, setStep] = useState(0);
+  const [pinned, setPinned] = useState(false);
 
-function iso(gx: number, gy: number) {
-  return { x: (gx - gy) * HW, y: (gx + gy) * HH };
-}
+  useEffect(() => {
+    if (pinned) return;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    const t = window.setInterval(() => setStep((s) => (s + 1) % STEPS.length), 3800);
+    return () => window.clearInterval(t);
+  }, [pinned]);
 
-function pathOf(pts: { x: number; y: number }[]) {
-  return pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ") + " Z";
-}
-
-function MapDemo() {
-  const [selected, setSelected] = useState<string>("agent");
-  const byId = useMemo(() => new Map(MAP_BUILDINGS.map((b) => [b.id, b])), []);
-  const building = byId.get(selected) ?? MAP_BUILDINGS[1]!;
-  const relatedFlows = MAP_FLOWS.filter((f) => f.from === building.id || f.to === building.id);
-  const lit = new Set<string>([building.id]);
-  for (const f of relatedFlows) {
-    lit.add(f.from);
-    lit.add(f.to);
-  }
-
-  const pad = 48;
-  const GRID_W = 12;
-  const GRID_H = 9;
-  const corners = [iso(0, 0), iso(GRID_W, 0), iso(0, GRID_H), iso(GRID_W, GRID_H)];
-  const minX = Math.min(...corners.map((c) => c.x)) - pad;
-  const maxX = Math.max(...corners.map((c) => c.x)) + pad;
-  const minY = Math.min(...corners.map((c) => c.y)) - pad - 6 * (LH + SLAB_GAP);
-  const maxY = Math.max(...corners.map((c) => c.y)) + pad;
-
-  const grid: ReactNode[] = [];
-  for (let gx = 0; gx <= GRID_W; gx++) {
-    const a = iso(gx, 0);
-    const b = iso(gx, GRID_H);
-    grid.push(
-      <line key={`vx-${gx}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d5dbe3" strokeWidth={1} />,
-    );
-  }
-  for (let gy = 0; gy <= GRID_H; gy++) {
-    const a = iso(0, gy);
-    const b = iso(GRID_W, gy);
-    grid.push(
-      <line key={`hy-${gy}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d5dbe3" strokeWidth={1} />,
-    );
-  }
-
-  const sorted = [...MAP_BUILDINGS].sort((a, b) => a.x + a.y - (b.x + b.y));
+  const visibleNodes =
+    step === 0 ? GRAPH_NODES.slice(0, 4) : GRAPH_NODES;
+  const visibleEdges =
+    step === 0 ? [] : step === 1 ? GRAPH_EDGES.filter((e) => e.confidence === "EXTRACTED") : GRAPH_EDGES;
+  const byId = useMemo(() => new Map(GRAPH_NODES.map((n) => [n.id, n])), []);
+  const colorize = step === 2;
 
   return (
-    <div className="flex h-full min-h-[24rem] flex-1 flex-col overflow-hidden rounded-[20px] bg-[#ece8df]">
-      <svg
-        viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
-        className="h-[18rem] w-full flex-1 sm:h-[22rem]"
-        role="img"
-        aria-label="Interactive isometric system map of a toy inbox app. Click a building to inspect it."
-      >
-        {grid}
-        {MAP_FLOWS.map((flow) => {
-          const a = byId.get(flow.from);
-          const b = byId.get(flow.to);
-          if (!a || !b) return null;
-          const pa = iso(a.x + a.size / 2, a.y + a.size / 2);
-          const pb = iso(b.x + b.size / 2, b.y + b.size / 2);
-          const active = flow.from === building.id || flow.to === building.id;
-          return (
-            <line
-              key={`${flow.from}-${flow.to}`}
-              x1={pa.x}
-              y1={pa.y}
-              x2={pb.x}
-              y2={pb.y}
-              stroke="#5a9a0a"
-              strokeWidth={active ? 3 : 2}
-              strokeOpacity={active ? 0.95 : 0.28}
-            />
-          );
-        })}
-        {sorted.map((m) => {
-          const palIndex = Math.max(
-            0,
-            MAP_CATEGORIES.findIndex((c) => c.id === m.category),
-          );
-          const pal = MAP_PALETTES[palIndex % MAP_PALETTES.length]!;
-          const isSel = m.id === building.id;
-          const isLit = lit.has(m.id);
-          const s = m.size;
-          const slabs: ReactNode[] = [];
-          for (let i = 0; i < m.stack; i++) {
-            const zBot = i * (LH + SLAB_GAP);
-            const zTop = zBot + LH;
-            const N = iso(m.x, m.y);
-            const E = iso(m.x + s, m.y);
-            const S = iso(m.x + s, m.y + s);
-            const W = iso(m.x, m.y + s);
-            slabs.push(
-              <g key={i}>
-                <path
-                  d={pathOf([
-                    { x: W.x, y: W.y - zTop },
-                    { x: S.x, y: S.y - zTop },
-                    { x: S.x, y: S.y - zBot },
-                    { x: W.x, y: W.y - zBot },
-                  ])}
-                  fill={pal.left}
-                  stroke="#5c6775"
-                  strokeWidth={isSel ? 1.6 : 1}
-                />
-                <path
-                  d={pathOf([
-                    { x: S.x, y: S.y - zTop },
-                    { x: E.x, y: E.y - zTop },
-                    { x: E.x, y: E.y - zBot },
-                    { x: S.x, y: S.y - zBot },
-                  ])}
-                  fill={pal.right}
-                  stroke="#5c6775"
-                  strokeWidth={isSel ? 1.6 : 1}
-                />
-                <path
-                  d={pathOf([
-                    { x: N.x, y: N.y - zTop },
-                    { x: E.x, y: E.y - zTop },
-                    { x: S.x, y: S.y - zTop },
-                    { x: W.x, y: W.y - zTop },
-                  ])}
-                  fill={pal.top}
-                  stroke="#5c6775"
-                  strokeWidth={isSel ? 1.6 : 1}
-                />
-              </g>,
-            );
-          }
-          const roof = iso(m.x + s / 2, m.y + s / 2);
-          const h = m.stack * (LH + SLAB_GAP);
-          return (
-            <g
-              key={m.id}
-              onClick={() => setSelected(m.id)}
-              className="cursor-pointer"
-              opacity={isLit ? 1 : 0.4}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter" || ev.key === " ") {
-                  ev.preventDefault();
-                  setSelected(m.id);
-                }
-              }}
-            >
-              {isSel ? (
-                <ellipse
-                  cx={roof.x}
-                  cy={roof.y + 8}
-                  rx={HW * s * 0.85}
-                  ry={HH * s * 0.7}
-                  fill="#b8ff3c"
-                  fillOpacity="0.45"
-                />
-              ) : null}
-              {slabs}
-              <text
-                x={roof.x}
-                y={roof.y - h + HH * 0.35 * s}
-                textAnchor="middle"
-                fontSize={12}
-                fontWeight={700}
-                fill="#0b0d10"
-              >
-                {m.code}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+    <section id="how" className="scroll-mt-20 px-4 py-24 sm:px-6 sm:py-32">
+      <div className="mx-auto max-w-6xl">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/40">
+          How it works
+        </p>
+        <h2 className="mt-4 max-w-3xl font-display text-[clamp(2.5rem,6vw,4.25rem)] font-semibold leading-[1.04] tracking-[-0.035em]">
+          How Haywire
+          <br />
+          graphs a repo
+        </h2>
+        <p className="mt-6 max-w-xl text-[17px] leading-[1.6] text-[#999]">
+          Haywire constructs a graph index of your codebase, then lets you — or
+          an agent — query symbols, callers, and paths instead of grepping in
+          the dark.
+        </p>
 
-      <div className="m-2 mt-0 rounded-[16px] bg-black px-4 py-3 text-white sm:px-5">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="font-display text-base font-semibold tracking-tight">{building.name}</p>
-          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/45">
-            {MAP_CATEGORIES.find((c) => c.id === building.category)?.label}
-          </p>
-        </div>
-        <p className="mt-1 text-sm text-white/65">{building.what}</p>
-        <p className="mt-1 font-mono text-xs text-white/40">{building.files.join(" · ")}</p>
-        {relatedFlows.length > 0 ? (
-          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-            {relatedFlows.map((f) => {
-              const otherId = f.from === building.id ? f.to : f.from;
-              const other = byId.get(otherId);
-              const dir = f.from === building.id ? "sends" : "receives";
+        <div className="mt-14 grid items-stretch gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          <ol className="flex flex-col gap-2">
+            {STEPS.map((item, i) => {
+              const active = i === step;
               return (
-                <li key={`${f.from}-${f.to}`}>
+                <li key={item.n}>
                   <button
                     type="button"
-                    onClick={() => setSelected(otherId)}
-                    className="underline decoration-wire-signal decoration-2 underline-offset-2 hover:decoration-white"
+                    onClick={() => {
+                      setPinned(true);
+                      setStep(i);
+                    }}
+                    onMouseEnter={() => {
+                      setPinned(true);
+                      setStep(i);
+                    }}
+                    className={clsx(
+                      "w-full rounded-[20px] border px-5 py-5 text-left transition duration-300",
+                      active
+                        ? "border-wire-signal/50 bg-white/[0.06]"
+                        : "border-white/10 bg-transparent hover:border-white/20 hover:bg-white/[0.03]",
+                    )}
                   >
-                    {dir} {f.payload} {dir === "sends" ? "to" : "from"} {other?.name}
+                    <p
+                      className={clsx(
+                        "text-[11px] font-semibold tracking-[0.18em]",
+                        active ? "text-wire-signal" : "text-white/35",
+                      )}
+                    >
+                      STEP {item.n}
+                    </p>
+                    <h3 className="mt-2 font-display text-xl font-semibold tracking-[-0.03em]">
+                      {item.title}
+                    </h3>
+                    <p
+                      className={clsx(
+                        "mt-2 text-[15px] leading-[1.6] transition-opacity duration-300",
+                        active ? "text-[#bbb]" : "text-[#777]",
+                      )}
+                    >
+                      {item.body}
+                    </p>
                   </button>
                 </li>
               );
             })}
-          </ul>
-        ) : null}
+          </ol>
+
+          <div className="overflow-hidden rounded-[24px] border border-white/10 bg-[#0c0c0e] p-4 sm:p-6">
+            <svg viewBox="0 0 540 360" className="h-full min-h-[18rem] w-full" aria-hidden>
+              {visibleEdges.map((e) => {
+                const a = byId.get(e.from);
+                const b = byId.get(e.to);
+                if (!a || !b) return null;
+                return (
+                  <line
+                    key={`${e.from}-${e.to}`}
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke={e.confidence === "INFERRED" ? "#666" : "#b8ff3c"}
+                    strokeOpacity={0.85}
+                    strokeWidth={1.6}
+                    strokeDasharray={e.confidence === "INFERRED" ? "5 4" : "10 8"}
+                    className="animate-dash-flow"
+                  />
+                );
+              })}
+              {visibleNodes.map((n) => {
+                const fill = colorize
+                  ? ["#4E79A7", "#F28E2B", "#59A14F"][n.community]
+                  : "#b8ff3c";
+                return (
+                  <g key={n.id} className="animate-fade-in">
+                    <circle cx={n.x} cy={n.y} r="11" fill={fill} className="animate-node-pulse" />
+                    <text
+                      x={n.x}
+                      y={n.y + 26}
+                      textAnchor="middle"
+                      fontSize="12"
+                      fill="#e8e8e8"
+                    >
+                      {n.label}
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
+  );
+}
+
+function QueryPlayground() {
+  const [active, setActive] = useState<(typeof MCP_TOOLS)[number]["id"]>("calls");
+  const tool = MCP_TOOLS.find((t) => t.id === active) ?? MCP_TOOLS[1]!;
+
+  return (
+    <section className="px-4 py-16 sm:px-6 sm:py-24">
+      <div className="mx-auto max-w-6xl">
+        <h2 className="max-w-3xl font-display text-[clamp(2.5rem,6vw,4.25rem)] font-semibold leading-[1.04] tracking-[-0.035em]">
+          Query it like
+          <br />
+          an agent would
+        </h2>
+        <p className="mt-6 max-w-xl text-[17px] leading-[1.6] text-[#999]">
+          The same graph powers Haywire MCP. Click a tool — this is what a
+          coding agent gets back instead of a pile of files.
+        </p>
+
+        <SpotlightCard>
+          <div className="flex flex-wrap gap-2">
+            {MCP_TOOLS.map((t) => (
+              <button
+                type="button"
+                key={t.id}
+                onClick={() => setActive(t.id)}
+                className={clsx(
+                  "rounded-full px-4 py-2 font-mono text-xs font-semibold transition duration-200",
+                  t.id === active
+                    ? "bg-wire-signal text-black"
+                    : "bg-white/5 text-white/70 hover:bg-white/10 hover:text-white",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-6 overflow-hidden rounded-[16px] border border-white/10 bg-black font-mono text-[13px] leading-relaxed">
+            <div className="border-b border-white/10 px-4 py-2.5 text-white/40">
+              mcp · haywire
+            </div>
+            <div className="px-4 py-4">
+              <p className="text-wire-signal">
+                {tool.label}({tool.arg})
+              </p>
+              <div className="mt-3 space-y-1.5">
+                {tool.lines.map((line) => (
+                  <p
+                    key={line.text}
+                    className={clsx(
+                      "animate-fade-up",
+                      line.tone === "ok" ? "text-white" : "text-white/40",
+                    )}
+                  >
+                    {line.text}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </div>
+        </SpotlightCard>
+      </div>
+    </section>
   );
 }
 
@@ -669,12 +617,12 @@ function WhyVisual({ kind }: { kind: (typeof WHY)[number]["visual"] }) {
   if (kind === "blast") {
     return (
       <svg viewBox="0 0 320 240" className="h-full w-full" aria-hidden>
-        <line x1="70" y1="120" x2="160" y2="120" stroke="#b8ff3c" strokeWidth="2" />
-        <line x1="160" y1="120" x2="250" y2="58" stroke="#b8ff3c" strokeWidth="2" />
-        <line x1="160" y1="120" x2="250" y2="120" stroke="#b8ff3c" strokeWidth="2" />
-        <line x1="160" y1="120" x2="250" y2="182" stroke="#b8ff3c" strokeWidth="2" />
+        <line x1="70" y1="120" x2="160" y2="120" stroke="#b8ff3c" strokeWidth="2" className="group-hover:animate-dash-flow" />
+        <line x1="160" y1="120" x2="250" y2="58" stroke="#b8ff3c" strokeWidth="2" className="group-hover:animate-dash-flow" />
+        <line x1="160" y1="120" x2="250" y2="120" stroke="#b8ff3c" strokeWidth="2" className="group-hover:animate-dash-flow" />
+        <line x1="160" y1="120" x2="250" y2="182" stroke="#b8ff3c" strokeWidth="2" className="group-hover:animate-dash-flow" />
         <circle cx="70" cy="120" r="8" fill="#333" />
-        <circle cx="160" cy="120" r="16" fill="#b8ff3c" />
+        <circle cx="160" cy="120" r="16" fill="#b8ff3c" className="group-hover:animate-node-pulse" />
         <circle cx="250" cy="58" r="9" fill="#fff" />
         <circle cx="250" cy="120" r="9" fill="#fff" />
         <circle cx="250" cy="182" r="9" fill="#fff" />
@@ -694,26 +642,62 @@ function WhyVisual({ kind }: { kind: (typeof WHY)[number]["visual"] }) {
           [140, 190, "#59A14F"],
           [180, 175, "#59A14F"],
         ].map(([x, y, fill], i) => (
-          <circle key={i} cx={x} cy={y} r="11" fill={String(fill)} />
+          <circle
+            key={i}
+            cx={x}
+            cy={y}
+            r="11"
+            fill={String(fill)}
+            className="origin-center transition duration-500 group-hover:scale-110"
+          />
         ))}
       </svg>
     );
   }
-  if (kind === "map") {
+  if (kind === "path") {
     return (
       <svg viewBox="0 0 320 240" className="h-full w-full" aria-hidden>
-        <MiniBuilding x={70} y={140} h={50} fill="#e7f3c2" />
-        <MiniBuilding x={140} y={150} h={90} fill="#dfe7f5" />
-        <MiniBuilding x={210} y={145} h={40} fill="#f3e6d4" />
-        <line x1="95" y1="150" x2="165" y2="120" stroke="#b8ff3c" strokeWidth="2" />
-        <line x1="185" y1="120" x2="235" y2="155" stroke="#b8ff3c" strokeWidth="2" />
+        <line x1="50" y1="180" x2="120" y2="110" stroke="#333" strokeWidth="2" />
+        <line
+          x1="120"
+          y1="110"
+          x2="200"
+          y2="110"
+          stroke="#b8ff3c"
+          strokeWidth="2.4"
+          strokeDasharray="8 6"
+          className="group-hover:animate-dash-flow"
+        />
+        <line
+          x1="200"
+          y1="110"
+          x2="270"
+          y2="50"
+          stroke="#b8ff3c"
+          strokeWidth="2.4"
+          strokeDasharray="8 6"
+          className="group-hover:animate-dash-flow"
+        />
+        <circle cx="50" cy="180" r="8" fill="#444" />
+        <circle cx="120" cy="110" r="10" fill="#b8ff3c" />
+        <circle cx="200" cy="110" r="10" fill="#b8ff3c" />
+        <circle cx="270" cy="50" r="10" fill="#fff" />
       </svg>
     );
   }
   if (kind === "edges") {
     return (
       <svg viewBox="0 0 320 240" className="h-full w-full" aria-hidden>
-        <line x1="60" y1="80" x2="260" y2="80" stroke="#fff" strokeWidth="2.2" />
+        <line
+          x1="60"
+          y1="80"
+          x2="260"
+          y2="80"
+          stroke="#fff"
+          strokeWidth="2.2"
+          strokeDasharray="10 8"
+          className="group-hover:animate-dash-flow"
+        />
         <line
           x1="60"
           y1="150"
@@ -752,7 +736,7 @@ function WhyVisual({ kind }: { kind: (typeof WHY)[number]["visual"] }) {
             </g>
           );
         })}
-        <circle cx="160" cy="120" r="22" fill="#ff5a36" />
+        <circle cx="160" cy="120" r="22" fill="#ff5a36" className="group-hover:animate-node-pulse" />
       </svg>
     );
   }
@@ -772,32 +756,5 @@ function WhyVisual({ kind }: { kind: (typeof WHY)[number]["visual"] }) {
         12ms · 0 files dumped
       </text>
     </svg>
-  );
-}
-
-function MiniBuilding({
-  x,
-  y,
-  h,
-  fill,
-}: {
-  x: number;
-  y: number;
-  h: number;
-  fill: string;
-}) {
-  const w = 42;
-  return (
-    <g>
-      <path d={`M ${x} ${y} L ${x + w / 2} ${y - 12} L ${x + w / 2} ${y - 12 - h} L ${x} ${y - h} Z`} fill={fill} />
-      <path
-        d={`M ${x + w / 2} ${y - 12} L ${x + w} ${y} L ${x + w} ${y - h} L ${x + w / 2} ${y - 12 - h} Z`}
-        fill="#c8c8c4"
-      />
-      <path
-        d={`M ${x} ${y - h} L ${x + w / 2} ${y - 12 - h} L ${x + w} ${y - h} L ${x + w / 2} ${y - h - 12} Z`}
-        fill="#f7ffe3"
-      />
-    </g>
   );
 }

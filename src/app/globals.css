@@ -114,7 +114,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .pixel-cell,
-  .shimmer-label {
+  .shimmer-label,
+  .animate-dash-flow,
+  .animate-node-pulse {
     animation: none !important;
   }
 }
