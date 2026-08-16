@@ -65,8 +65,9 @@ export function HomeHero() {
             />
           </h1>
 
-          <p className="animate-fade-up mt-6 max-w-md text-lg leading-snug text-wire-mute sm:text-xl [animation-delay:180ms]">
-            Paste a GitHub repo. Watch the codebase untangle into a live, clickable graph.
+          <p className="animate-fade-up mt-6 max-w-lg text-lg leading-snug text-wire-mute sm:text-xl [animation-delay:180ms]">
+            Paste a GitHub repo. Haywire turns it into a live knowledge graph of the
+            code — and an isometric map of how the system is wired.
           </p>
 
           <form
